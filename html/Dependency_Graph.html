@@ -2,7 +2,7 @@
 <html>
 <head><meta charset="utf-8" />
 
-<title>Dependency Graph</title>
+<title>Dependency_Graph</title>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.10/require.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
@@ -13077,9 +13077,31 @@ div#notebook {
 <div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
 </div><div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<p>Author: Tony Yum</p>
-<p><a href="https://github.com/jiujitsu-sekai/kinyu-demos">GitHub</a>
-<a href="https://www.linkedin.com/in/tonyyum/">Linkedin</a></p>
+<table class="tfo-notebook-buttons" align="left">
+  <td>
+    <a target="_blank" href="https://colab.research.google.com/github/tayglobal/kinyu-demo/blob/master/notebooks/Dependency_Graph.ipynb"><img src="https://files.tayglobal.com/images/icons/colab_logo_32px.png" />Run in Google Colab</a>
+  </td>
+  <td>
+    <a target="_blank" href="https://github.com/tayglobal/kinyu-demo/blob/master/notebooks/Dependency_Graph.ipynb"><img src="https://www.tensorflow.org/images/GitHub-Mark-32px.png" />View on GitHub</a>
+  </td>
+  <td>
+    <a href="https://files.tayglobal.com/blog/2020-07-31/Dependency_Graph.html"><img src="https://files.tayglobal.com/images/icons/download_logo_32px.png" />Download notebook</a>
+  </td>
+</table>
+</div>
+</div>
+</div>
+<div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
+</div><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
+<p>Author: <a href="https://www.linkedin.com/in/tonyyum/">Tony Yum</a></p>
+
+</div>
+</div>
+</div>
+<div class="cell border-box-sizing text_cell rendered"><div class="prompt input_prompt">
+</div><div class="inner_cell">
+<div class="text_cell_render border-box-sizing rendered_html">
 <h1 id="Overridable-Dependency-Graph">Overridable Dependency Graph<a class="anchor-link" href="#Overridable-Dependency-Graph">&#182;</a></h1><p>In this demo I would like to show the concept of a overridable dependency graph and a very simple implementation to demonstrate it.</p>
 <h2 id="Why?">Why?<a class="anchor-link" href="#Why?">&#182;</a></h2><p>In finance/banking one of the most common questions asked is "what is my risk". One way to define risk is what if I change a risk factor in the market, what would the impact of my portfolio be.</p>
 <p>In essence we want to override a piece of market data and re-price a portfolio. This would mean every function/node in the tree that represent your calculation would need to be executed again for each senario. Think about this.</p>
