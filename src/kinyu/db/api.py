@@ -1,12 +1,42 @@
 from .config import DB_MODULES
+from .base import BaseDB, IDB
 import importlib
+from typing import Tuple
+
+class UnionDB:
+    def __init__(self, dbs: Tuple[BaseDB]):
+        self.dbs = dbs
+        
+    def exists(self, key: str):
+         return any(db.exists(key) for db in self.dbs)
+        
+    def __getitem__(self, key: str):
+        for db in self.dbs:
+            try:
+                return db[key]
+            except:
+                pass
+            
+        raise KeyError(key)
+        
+    def __setitem__(self, key, value):
+        print(f'setting {key} to {value}')
+        print(f'db = {self.dbs[0]}')
+        self.dbs[0][key] = value
 
 
 class DBFactor:
     def __init__(self):
         self._db_cache = {}
 
-    def connect(self, url) -> 'BaseDB':
+
+    def connect(self, url: str) -> IDB:
+        dbs = [self._connect(x) for x in url.split(';')]
+        if len(dbs) == 1:
+            return dbs[0]
+        return UnionDB(dbs)
+    
+    def _connect(self, url: str) -> BaseDB:
         if url not in self._db_cache:
             db_cls = self._resolve_db_class(url)
             self._db_cache[url] = db_cls(url)

@@ -5,18 +5,19 @@ import pytest
 
 @pytest.fixture
 def db():
-    return kydb.connect('dynamodb://epython')
+    return kydb.connect('memory://unittest')
 
 
-def test_dynamodb(db):
-    assert type(db).__name__ == 'DynamoDB'
-    key = '/unittests/dynamodb/foo'
+def test_memory(db):
+    key = '/unittests/foo'
     db[key] = 123
     assert db[key] == 123
-    assert db.read(key, reload=True) == 123
+    db[key] = 456
+    assert db[key] == 456
+    assert db.read(key, reload=True) == 456
 
 
-def test_dynamodb_dict(db):
+def test_memory_dict(db):
     key = '/unittests/dynamodb/bar'
     val = {
         'my_int': 123,

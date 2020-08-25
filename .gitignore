@@ -1,2 +1,3 @@
 backup.sh
 **/.ipynb_checkpoints
+**/__pycache__

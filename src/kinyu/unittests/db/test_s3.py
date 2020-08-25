@@ -9,13 +9,13 @@ def db():
 
 
 def test_s3(db):
-    key = '/unittests/dynamodb/foo'
+    key = '/unittests/s3/foo'
     db[key] = 123
     assert db[key] == 123
 
 
 def test_s3_dict(db):
-    key = '/unittests/dynamodb/bar'
+    key = '/unittests/s3/bar'
     val = {
         'my_int': 123,
         'my_float': 123.456,

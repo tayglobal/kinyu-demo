@@ -4,8 +4,9 @@ import s3fs
 
 class S3DB(BaseDB):
 
-    def __init__(self, uri: str):
-        self.prefix = uri
+    def __init__(self, url: str):
+        super().__init__(url)
+        self.prefix = url
         if not self.prefix.endswith('/'):
             self.prefix += '/'
 

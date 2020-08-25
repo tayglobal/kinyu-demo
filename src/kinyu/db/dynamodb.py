@@ -5,8 +5,9 @@ import boto3
 
 class DynamoDB(BaseDB):
 
-    def __init__(self, uri: str):
-        table_name = uri.split('://', 1)[1]
+    def __init__(self, url: str):
+        super().__init__(url)
+        table_name = url.split('://', 1)[1]
         dynamodb = boto3.resource('dynamodb')
         self.table = dynamodb.Table(table_name)
 
