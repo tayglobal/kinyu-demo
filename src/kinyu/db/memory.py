@@ -2,7 +2,7 @@ from .base import BaseDB
 
 
 class MemoryDB(BaseDB):
-    __cache = {} 
+    __cache = {}
 
     def __init__(self, url: str):
         super().__init__(url)
