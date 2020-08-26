@@ -19,7 +19,7 @@ class RemoteFinder(MetaPathFinder):
             return ModuleSpec(fullname, self, origin=key)
 
         key = fullname.replace('.', '/') + '/__init__.py'
-        
+
         if self.db.exists(key):
             return ModuleSpec(fullname, self, origin=key)
 
@@ -44,7 +44,7 @@ class RemoteImporter:
     def __init__(self, url: str):
         self.url = url
         self.db = kydb.connect(url)
-        
+
     def install(self):
         finder = RemoteFinder(self.db)
         sys.meta_path.append(finder)
