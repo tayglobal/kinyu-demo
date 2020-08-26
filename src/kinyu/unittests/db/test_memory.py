@@ -18,7 +18,7 @@ def test_memory(db):
 
 
 def test_memory_dict(db):
-    key = '/unittests/dynamodb/bar'
+    key = '/unittests/bar'
     val = {
         'my_int': 123,
         'my_float': 123.456,
@@ -29,3 +29,11 @@ def test_memory_dict(db):
     db[key] = val
     assert db[key] == val
     assert db.read(key, reload=True) == val
+
+
+def test_memory_with_basepath():
+    db = kydb.connect('memory://unittest/my/base/path')
+    key = '/apple'
+    db[key] = 123
+    assert db[key] == 123
+    assert db.read(key, reload=True) == 123

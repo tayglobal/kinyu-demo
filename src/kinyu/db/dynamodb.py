@@ -7,9 +7,8 @@ class DynamoDB(BaseDB):
 
     def __init__(self, url: str):
         super().__init__(url)
-        table_name = url.split('://', 1)[1]
         dynamodb = boto3.resource('dynamodb')
-        self.table = dynamodb.Table(table_name)
+        self.table = dynamodb.Table(self.db_name)
 
     def get_raw(self, key):
         items = self.table.query(

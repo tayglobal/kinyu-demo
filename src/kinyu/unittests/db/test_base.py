@@ -51,3 +51,32 @@ def test_exists(db):
     db[key] = 123
     assert db.exists(key)
     assert not db.exists('does_not_exist')
+
+
+def test___get_name_and_basepath():
+    assert BaseDB._get_name_and_basepath(
+        's3://kinyu-demo') == ('kinyu-demo', '/')
+    assert BaseDB._get_name_and_basepath(
+        's3://kinyu-demo/') == ('kinyu-demo', '/')
+    assert BaseDB._get_name_and_basepath(
+        's3://kinyu-demo/foo') == ('kinyu-demo', '/foo/')
+    assert BaseDB._get_name_and_basepath(
+        's3://kinyu-demo/foo/') == ('kinyu-demo', '/foo/')
+    assert BaseDB._get_name_and_basepath(
+        's3://kinyu-demo/foo/bar') == ('kinyu-demo', '/foo/bar/')
+    assert BaseDB._get_name_and_basepath(
+        's3://kinyu-demo/foo/bar/') == ('kinyu-demo', '/foo/bar/')
+
+
+def test__get_full_path():
+    assert DummyDb('s3://kinyu-demo')._get_full_path('apple') == '/apple'
+    assert DummyDb('s3://kinyu-demo/')._get_full_path('apple') == '/apple'
+
+    assert DummyDb(
+        's3://kinyu-demo/foo/bar')._get_full_path('apple') == '/foo/bar/apple'
+    assert DummyDb(
+        's3://kinyu-demo/foo/bar')._get_full_path('/apple') == '/foo/bar/apple'
+    assert DummyDb(
+        's3://kinyu-demo/foo/bar')._get_full_path('/apple/orange') == '/foo/bar/apple/orange'
+    assert DummyDb(
+        's3://kinyu-demo/foo/bar')._get_full_path('apple/orange') == '/foo/bar/apple/orange'

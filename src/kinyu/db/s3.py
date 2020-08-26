@@ -12,13 +12,13 @@ class S3DB(BaseDB):
 
         self.fs = s3fs.S3FileSystem()
 
-    def get_raw(self, key):
+    def get_raw(self, key: str):
         return self.fs.open(
-            self._get_full_path(key), 'rb').read()
+            self._get_s3_path(key), 'rb').read()
 
-    def set_raw(self, key, value):
-        with self.fs.open(self._get_full_path(key), 'wb') as f:
+    def set_raw(self, key: str, value):
+        with self.fs.open(self._get_s3_path(key), 'wb') as f:
             f.write(value)
 
-    def _get_full_path(self, key):
-        return self.prefix + key
+    def _get_s3_path(self, key: str):
+        return 's3://' + self.db_name + self._get_full_path(key)
