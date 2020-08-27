@@ -1,6 +1,17 @@
 from kinyu.db.api import kydb
 from kinyu.rimport.api import RemoteImporter
+import os
+import tempfile
+import pytest
 
+
+@pytest.fixture
+def script_file():
+    f = tempfile.NamedTemporaryFile('w', delete=False)
+    f.close()
+    yield f.name
+    os.remove(f.name)
+    
 
 def test_install():
     ri = RemoteImporter('memory://cache001')
@@ -26,3 +37,17 @@ def hello_world():
 '''
     ri.add_script('bar.py', script)
     assert ri.db['bar.py']['code'] == script
+    
+def test_add_script_from_file(script_file):
+    script = '''
+def ff():
+    print("I'm from a file")
+'''
+    with open(script_file, 'w') as f:
+        f.write(script)
+
+    ri = RemoteImporter('memory://cache003')
+    key = 'from_file.py'
+    ri.add_script_from_file(key, script_file)
+    assert ri.db[key]['code'] == script
+    

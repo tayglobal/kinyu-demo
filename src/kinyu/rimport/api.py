@@ -52,3 +52,7 @@ class RemoteImporter:
         self.db[key] = {
             'code': script
         }
+        
+    def add_script_from_file(self, key: str, filename: str):
+        with open(filename, 'r') as f:
+            self.add_script(key, f.read())
