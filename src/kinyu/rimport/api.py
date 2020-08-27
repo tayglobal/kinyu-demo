@@ -27,7 +27,6 @@ class RemoteFinder(MetaPathFinder):
         """
         Module creator. Returning None causes Python to use the default module creator.
         """
-        print(spec)
         name_parts = spec.name.split('.')
         module = types.ModuleType('.'.join(name_parts))
         module.__path__ = name_parts[:-1]
