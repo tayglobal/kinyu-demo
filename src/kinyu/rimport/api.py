@@ -48,3 +48,8 @@ class RemoteImporter:
     def install(self):
         finder = RemoteFinder(self.db)
         sys.meta_path.append(finder)
+
+    def add_script(self, key: str, script: str):
+        self.db[key] = {
+            'code': script
+        }
