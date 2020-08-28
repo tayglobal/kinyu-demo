@@ -1,7 +1,7 @@
 import click
 import importlib
 import json
-from kinyu.rimport.api import RemoteImporter
+from kinyu.rimport.api import rimp
 
 
 @click.command()
@@ -10,8 +10,7 @@ from kinyu.rimport.api import RemoteImporter
 @click.option('--args', default='{}', help='Arguments to be passed into entry function in JSON format')
 @click.argument('module_path')
 def run(srcdb, entry, args, module_path):
-    ri = RemoteImporter(srcdb)
-    ri.install()
+    rimp.set_srcdb(srcdb)
     m = importlib.import_module(module_path)
     getattr(m, entry)(**json.loads(args))
 
