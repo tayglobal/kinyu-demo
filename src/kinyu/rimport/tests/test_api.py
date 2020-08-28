@@ -1,5 +1,5 @@
 from kinyu.db.api import kydb
-from kinyu.rimport.api import RemoteImporter
+from kinyu.rimport.api import RemoteImporter, rimp
 import os
 import tempfile
 import pytest
@@ -11,7 +11,7 @@ def script_file():
     f.close()
     yield f.name
     os.remove(f.name)
-    
+
 
 def test_install():
     ri = RemoteImporter('memory://cache001')
@@ -37,7 +37,8 @@ def hello_world():
 '''
     ri.add_script('bar.py', script)
     assert ri.db['bar.py']['code'] == script
-    
+
+
 def test_add_script_from_file(script_file):
     script = '''
 def ff():
@@ -50,4 +51,8 @@ def ff():
     key = 'from_file.py'
     ri.add_script_from_file(key, script_file)
     assert ri.db[key]['code'] == script
-    
+
+
+def test_rimp():
+    rimp.set_srcdb('memory://cache004')
+    assert type(rimp.remote_importer.db).__name__ == 'MemoryDB'
