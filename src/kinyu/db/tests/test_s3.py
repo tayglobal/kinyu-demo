@@ -21,10 +21,13 @@ def test__get_s3_path():
     assert db._get_s3_path('/foo') == db.url + '/foo'
 
 
-def test_s3(db):
+def test_s3_basic(db):
     key = '/unittests/s3/foo'
     db[key] = 123
     assert db[key] == 123
+    assert db.exists(key)
+    db.delete(key)
+    assert not db.exists(key)
 
 
 def test_s3_dict(db):

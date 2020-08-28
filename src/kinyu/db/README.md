@@ -38,6 +38,12 @@ Reading from DB:
 db[key] # returns 123
 ```
 
+Deleting:
+
+```python
+db.delete[key]
+```
+
 The above actually performed no read from the S3 bucket because of the cache.
 Let's force reload when we read.
 

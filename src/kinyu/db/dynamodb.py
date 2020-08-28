@@ -20,3 +20,8 @@ class DynamoDB(BaseDB):
             'path': key,
             'contents': value
         })
+
+    def delete_raw(self, key: str):
+        self.table.delete_item(Key={
+            'path': key,
+        })

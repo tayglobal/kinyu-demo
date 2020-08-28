@@ -11,6 +11,9 @@ class IDB(ABC):
     def __setitem__(self, key: str, value):
         raise NotImplementedError()
 
+    def delete(self, key: str):
+        raise NotImplementedError()
+
 
 class BaseDB(IDB):
     def __init__(self, url: str):
@@ -79,11 +82,18 @@ class BaseDB(IDB):
         self._cache[key] = value
         self.set_raw(self._get_full_path(key), self._serialise(value))
 
-    def get_raw(self, key):
+    def get_raw(self, key: str):
         raise NotImplementedError()
 
-    def set_raw(self, key, value):
+    def set_raw(self, key: str, value):
         raise NotImplementedError()
+
+    def delete_raw(self, key: str):
+        raise NotImplementedError()
+
+    def delete(self, key: str):
+        del self._cache[key]
+        self.delete_raw(key)
 
     def new(self, class_path: str, db_path: str, **kwargs):
         module_path, class_name = class_path.rsplit('.', 1)

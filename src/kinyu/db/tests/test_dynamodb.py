@@ -11,12 +11,14 @@ def db():
     return kydb.connect('dynamodb://' + DYNAMODB)
 
 
-def test_dynamodb(db):
+def test_dynamodb_basic(db):
     assert type(db).__name__ == 'DynamoDB'
     key = '/unittests/dynamodb/foo'
     db[key] = 123
     assert db[key] == 123
     assert db.read(key, reload=True) == 123
+    db.delete(key)
+    assert not db.exists(key)
 
 
 def test_dynamodb_dict(db):
@@ -39,3 +41,11 @@ def test_memory_with_basepath():
     db[key] = 123
     assert db[key] == 123
     assert db.read(key, reload=True) == 123
+
+
+def test_dynamodb_errors(db):
+    with pytest.raises(KeyError):
+        db['does_not_exist']
+
+    with pytest.raises(KeyError):
+        db.delete('does_not_exist')

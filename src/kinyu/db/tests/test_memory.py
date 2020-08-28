@@ -15,6 +15,16 @@ def test_memory(db):
     db[key] = 456
     assert db[key] == 456
     assert db.read(key, reload=True) == 456
+    db.delete(key)
+    assert not db.exists(key)
+
+
+def test_memory_errors(db):
+    with pytest.raises(KeyError):
+        db['does_not_exist']
+
+    with pytest.raises(KeyError):
+        db.delete('does_not_exist')
 
 
 def test_memory_dict(db):

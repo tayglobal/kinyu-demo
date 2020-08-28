@@ -13,3 +13,6 @@ class MemoryDB(BaseDB):
 
     def set_raw(self, key, value):
         self.__cache[self.db_name][key] = value
+
+    def delete_raw(self, key: str):
+        del self.__cache[self.db_name][key]
