@@ -1,0 +1,174 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Main &#8212; Kinyu Demo 0.1 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="KYDB (Kinyu Database)" href="kydb.html" />
+    <link rel="prev" title="Kinyu Demo documentation" href="index.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="main">
+<h1>Main<a class="headerlink" href="#main" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this headline">¶</a></h2>
+<p>This is the entry point to the Kinyu Demo system.
+There need only one container registered on Docker Hub or ECR and we can run any code on a cluster.
+There are no need to rebuild the container on code change, making experimental code much easier to test.</p>
+</div>
+<div class="section" id="local-conatiner">
+<h2>Local Conatiner<a class="headerlink" href="#local-conatiner" title="Permalink to this headline">¶</a></h2>
+<p>Get the Docker container</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker pull tayglobal/kinyu-demo:0.1
+</pre></div>
+</div>
+<p>Create <code class="docutils literal notranslate"><span class="pre">hello.py</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">main</span><span class="p">():</span>
+     <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Hello World!&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Upload it to remote source</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python -m kinyu.rimport.uploader --srcdb<span class="o">=</span>redis://my-redis-host/my-source --key<span class="o">=</span>hello.py /tmp/hello.py
+</pre></div>
+</div>
+<p>Run container pointing at that source:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker run tayglobal/kinyu-demo:0.1 python -m kinyu.main --srcdb<span class="o">=</span>redis://my-redis-host hello
+</pre></div>
+</div>
+<p>And we would see printing of  <em>Hello World!</em>. You can update the code on remote source db and repeat to see different results.</p>
+</div>
+<div class="section" id="run-on-ecs-cluster">
+<h2>Run on ECS Cluster<a class="headerlink" href="#run-on-ecs-cluster" title="Permalink to this headline">¶</a></h2>
+<p>With <em>hello.py</em> still in the remote source db, we can launch a task on ECS Cluster:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">client</span> <span class="o">=</span> <span class="n">boto3</span><span class="o">.</span><span class="n">client</span><span class="p">(</span><span class="s1">&#39;ecs&#39;</span><span class="p">)</span>
+
+<span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">run_task</span><span class="p">(</span>
+    <span class="n">launchType</span><span class="o">=</span><span class="s1">&#39;FARGATE&#39;</span><span class="p">,</span>
+    <span class="n">cluster</span><span class="o">=</span><span class="s1">&#39;kinyu-demo&#39;</span><span class="p">,</span>
+    <span class="n">taskDefinition</span><span class="o">=</span><span class="s1">&#39;kinyu-demo&#39;</span><span class="p">,</span>
+    <span class="n">group</span><span class="o">=</span><span class="s1">&#39;family:kinyu-demo&#39;</span><span class="p">,</span>
+    <span class="n">networkConfiguration</span><span class="o">=</span><span class="p">{</span>
+        <span class="s1">&#39;awsvpcConfiguration&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;subnets&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;subnet-073c0a61&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;securityGroups&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;sg-05e5e111abfff2f77&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;assignPublicIp&#39;</span><span class="p">:</span> <span class="s1">&#39;ENABLED&#39;</span>
+        <span class="p">}</span>
+    <span class="p">},</span>
+
+    <span class="n">overrides</span><span class="o">=</span><span class="p">{</span>
+        <span class="s1">&#39;containerOverrides&#39;</span><span class="p">:</span> <span class="p">[</span>
+            <span class="p">{</span>
+                <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;kinyu-demo&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;command&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;python&#39;</span><span class="p">,</span> <span class="s1">&#39;-m&#39;</span><span class="p">,</span> <span class="s1">&#39;kinyu.main&#39;</span><span class="p">,</span>
+                    <span class="s1">&#39;--srcdb=my-redis-host&#39;</span><span class="p">,</span>
+                    <span class="s1">&#39;hello&#39;</span><span class="p">]</span>
+            <span class="p">}</span>
+        <span class="p">]</span>
+    <span class="p">}</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">Kinyu Demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Main</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#introduction">Introduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#local-conatiner">Local Conatiner</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#run-on-ecs-cluster">Run on ECS Cluster</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="kydb.html">KYDB (Kinyu Database)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rimport.html">Remote Import</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">Kinyu Demo documentation</a></li>
+      <li>Next: <a href="kydb.html" title="next chapter">KYDB (Kinyu Database)</a></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;MIT License.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.2.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="_sources/main.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
