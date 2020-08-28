@@ -6,8 +6,24 @@ class RedisDB(BaseDB):
 
     def __init__(self, url: str):
         super().__init__(url)
-        host, port = self.db_name.split(':')
-        self.connection = redis.Redis(host=host, port=port)
+
+        self.connection = redis.Redis(
+            **self._get_connection_kwargs(self.db_name))
+
+    @staticmethod
+    def _get_connection_kwargs(db_name: str):
+        if ':' in db_name:
+            host, port = db_name.split(':')
+            kwargs = {
+                'host': host,
+                'port': int(port, 10)
+            }
+        else:
+            kwargs = {
+                'host': db_name
+            }
+
+        return kwargs
 
     def get_raw(self, key):
         return self.connection.get(key)

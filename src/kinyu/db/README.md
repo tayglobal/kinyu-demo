@@ -73,6 +73,12 @@ db = kydb.connect('dynamodb://kydb')
 db = kydb.connect('redis://cache.epythoncloud.io:6379')
 ```
 
+Or simply:
+
+```python
+db = kydb.connect('redis://cache.epythoncloud.io')
+```
+
 ## In-Memory
 
 ```python

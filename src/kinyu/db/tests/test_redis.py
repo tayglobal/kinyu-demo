@@ -1,4 +1,5 @@
 from kinyu.db.api import kydb
+from kinyu.db.redis import RedisDB
 from datetime import datetime
 import os
 import pytest
@@ -28,3 +29,9 @@ def test_redis_dict(db):
     db[key] = val
     assert db[key] == val
     assert db.read(key, reload=True) == val
+
+
+def test_default_port():
+    assert RedisDB._get_connection_kwargs(
+        'my-host:1234') == {'host': 'my-host', 'port': 1234}
+    assert RedisDB._get_connection_kwargs('my-host2') == {'host': 'my-host2'}
