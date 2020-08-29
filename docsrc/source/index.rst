@@ -46,4 +46,5 @@ Below are the modules used for the demos.
    main
    kydb
    rimport
+   developer
 

@@ -1,0 +1,202 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Developer &#8212; Kinyu Demo 0.1 documentation</title>
+    <link rel="stylesheet" href="_static/alabaster.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <script id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+    <script src="_static/jquery.js"></script>
+    <script src="_static/underscore.js"></script>
+    <script src="_static/doctools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Remote Import" href="rimport.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+  
+  <meta name="viewport" content="width=device-width, initial-scale=0.9, maximum-scale=0.9" />
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <div class="section" id="developer">
+<h1>Developer<a class="headerlink" href="#developer" title="Permalink to this headline">¶</a></h1>
+<p>This page is for developers of Kinyu Demo.</p>
+<div class="section" id="style-guide">
+<h2>Style Guide<a class="headerlink" href="#style-guide" title="Permalink to this headline">¶</a></h2>
+<p><a class="reference external" href="https://www.python.org/dev/peps/pep-0008/">PEP8</a> Please.</p>
+<p>Use your favouite IDE plugin or at least use <a class="reference external" href="https://github.com/hhatto/autopep8">autopep8</a>.</p>
+<p>If you want to be fancy add Git pre-commit hooks to ensure formatting.</p>
+</div>
+<div class="section" id="unittest">
+<h2>Unittest<a class="headerlink" href="#unittest" title="Permalink to this headline">¶</a></h2>
+<p>Please ensure all unittests passes before PR.</p>
+<p>Note that <a class="reference internal" href="kydb.html#kydb-page-ref"><span class="std std-ref">KYDB (Kinyu Database)</span></a> unittests does require certain dbs to be setup.
+You would need to set the following environment variables:</p>
+<blockquote>
+<div><ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">KINYU_UNITTEST_S3_BUCKET</span></code>: name of the S3 Bucket</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">KINYU_UNITTEST_DYNAMODB</span></code>: name of the DynamoDB</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">KINYU_UNITTEST_REDIS_HOST</span></code>: host of the redis server. Can also end with :port if non standard port. i.e. redis-host:8765</p></li>
+</ul>
+</div></blockquote>
+</div>
+<div class="section" id="docker">
+<h2>Docker<a class="headerlink" href="#docker" title="Permalink to this headline">¶</a></h2>
+<p>You will find the <code class="docutils literal notranslate"><span class="pre">Dockerfile</span></code> in the project root directory.</p>
+<div class="section" id="building-the-container">
+<h3>Building the container<a class="headerlink" href="#building-the-container" title="Permalink to this headline">¶</a></h3>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker build --tag kinyu-demo:0.1 .
+</pre></div>
+</div>
+<p>List the images and we should see kinyu-demo</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker images
+</pre></div>
+</div>
+</div>
+<div class="section" id="bash-the-container">
+<h3>Bash the container<a class="headerlink" href="#bash-the-container" title="Permalink to this headline">¶</a></h3>
+<p>Find the docker</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker images
+</pre></div>
+</div>
+<p>Execute bash on it:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker <span class="nb">exec</span> -it &lt;container name&gt; /bin/bash
+</pre></div>
+</div>
+</div>
+<div class="section" id="docker-hub">
+<h3>Docker Hub<a class="headerlink" href="#docker-hub" title="Permalink to this headline">¶</a></h3>
+<p>Login to Docker Hub</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker login --username<span class="o">=</span>yourhubusername --email<span class="o">=</span>youremail@company.com
+</pre></div>
+</div>
+<p>Tag it:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker tag bb38976d03cf yourhubusername/kinyu-demo:0.1
+</pre></div>
+</div>
+<p>Push it:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker push yourhubusername/kinyu-demo
+</pre></div>
+</div>
+<p>You can now delete all the local docker images and pull it:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>docker pull tayglobal/kinyu-demo:0.1
+</pre></div>
+</div>
+</div>
+</div>
+<div class="section" id="ecr">
+<h2>ECR<a class="headerlink" href="#ecr" title="Permalink to this headline">¶</a></h2>
+<p>Authenticate:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>aws ecr get-login-password --region &lt;region&gt; <span class="p">|</span> docker login --username AWS --password-stdin &lt;aws_account_id&gt;.dkr.ecr.&lt;region&gt;.amazonaws.com
+</pre></div>
+</div>
+<p>Create repository:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>aws ecr create-repository <span class="se">\</span>
+    --repository-name kinyu-demo <span class="se">\</span>
+    --image-scanning-configuration <span class="nv">scanOnPush</span><span class="o">=</span><span class="nb">true</span> <span class="se">\</span>
+    --region eu-west-1
+
+docker tag tayglobal/kinyu-demo:0.1 <span class="m">499030764380</span>.dkr.ecr.eu-west-1.amazonaws.com/kinyu-demo:0.1
+
+docker push <span class="m">499030764380</span>.dkr.ecr.eu-west-1.amazonaws.com/kinyu-demo:0.1
+</pre></div>
+</div>
+</div>
+</div>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">Kinyu Demo</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="main.html">Main</a></li>
+<li class="toctree-l1"><a class="reference internal" href="kydb.html">KYDB (Kinyu Database)</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rimport.html">Remote Import</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Developer</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#style-guide">Style Guide</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#unittest">Unittest</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#docker">Docker</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#building-the-container">Building the container</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#bash-the-container">Bash the container</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#docker-hub">Docker Hub</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#ecr">ECR</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="rimport.html" title="previous chapter">Remote Import</a></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" />
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &copy;MIT License.
+      
+      |
+      Powered by <a href="http://sphinx-doc.org/">Sphinx 3.2.1</a>
+      &amp; <a href="https://github.com/bitprophet/alabaster">Alabaster 0.7.12</a>
+      
+      |
+      <a href="_sources/developer.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>
