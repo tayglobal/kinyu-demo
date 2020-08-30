@@ -18,5 +18,7 @@ class HttpDB(BaseDB):
 
     def get_raw(self, key: str):
         r = requests.get('{}://{}{}'.format(self.db_type, self.db_name,  key))
-        assert r.ok
+        if not r.ok:
+            raise KeyError(key)
+
         return bytes.fromhex(r.text)

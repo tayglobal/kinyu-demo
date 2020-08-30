@@ -15,7 +15,7 @@ class UnionDB:
         for db in self.dbs:
             try:
                 return db[key]
-            except:
+            except KeyError:
                 pass
 
         raise KeyError(key)
@@ -45,9 +45,10 @@ class DBFactor:
 
     def _resolve_db_class(self, url: str):
         db_type = url.split(':', 1)[0]
-        assert db_type in DB_MODULES, '{} is not one of the valid db types: {}'.format(
-            db_type,
-            list(iter(DB_MODULES.keys())))
+        assert db_type in DB_MODULES, \
+            '{} is not one of the valid db types: {}'.format(
+                db_type,
+                list(iter(DB_MODULES.keys())))
 
         class_name = DB_MODULES[db_type]
         module_path = __name__.rsplit('.', 1)[0] + '.' + db_type

@@ -13,6 +13,10 @@ class DynamoDB(BaseDB):
     def get_raw(self, key):
         items = self.table.query(
             KeyConditionExpression=Key('path').eq(key))['Items']
+
+        if not items:
+            raise KeyError(key)
+
         return items[0]['contents'].value
 
     def set_raw(self, key, value):

@@ -26,7 +26,11 @@ class RedisDB(BaseDB):
         return kwargs
 
     def get_raw(self, key: str):
-        return self.connection.get(key)
+        res = self.connection.get(key)
+        if not res:
+            raise KeyError(key)
+
+        return res
 
     def set_raw(self, key: str, value):
         self.connection.set(key, value)

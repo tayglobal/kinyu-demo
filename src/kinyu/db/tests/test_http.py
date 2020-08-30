@@ -1,7 +1,6 @@
 from kinyu.db.api import kydb
 from datetime import datetime
 import pytest
-import os
 
 BASE_URL = 'https://files.tayglobal.com/kinyu-demo'
 
@@ -36,6 +35,10 @@ def test_http_basic(db):
     key = '/db/tests/test_http_basic'
     assert db[key] == 123
     assert db.exists(key)
+
+
+def test_http_not_exist(db):
+    assert not db.exists('does_not_exist')
 
 
 def test_http_dict(db):

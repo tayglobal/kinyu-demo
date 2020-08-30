@@ -9,8 +9,11 @@ class S3DB(BaseDB):
         self.fs = s3fs.S3FileSystem()
 
     def get_raw(self, key: str):
-        return self.fs.open(
-            self._get_s3_path(key), 'rb').read()
+        try:
+            return self.fs.open(
+                self._get_s3_path(key), 'rb').read()
+        except FileNotFoundError:
+            raise KeyError(key)
 
     def set_raw(self, key: str, value):
         with self.fs.open(self._get_s3_path(key), 'wb') as f:

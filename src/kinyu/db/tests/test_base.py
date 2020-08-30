@@ -73,10 +73,14 @@ def test__get_full_path():
     assert DummyDb('s3://kinyu-demo/')._get_full_path('apple') == '/apple'
 
     assert DummyDb(
-        's3://kinyu-demo/foo/bar')._get_full_path('apple') == '/foo/bar/apple'
+        's3://kinyu-demo/foo/bar')._get_full_path('apple'
+                                                  ) == '/foo/bar/apple'
     assert DummyDb(
-        's3://kinyu-demo/foo/bar')._get_full_path('/apple') == '/foo/bar/apple'
+        's3://kinyu-demo/foo/bar')._get_full_path('/apple'
+                                                  ) == '/foo/bar/apple'
     assert DummyDb(
-        's3://kinyu-demo/foo/bar')._get_full_path('/apple/orange') == '/foo/bar/apple/orange'
+        's3://kinyu-demo/foo/bar')._get_full_path('/apple/orange'
+                                                  ) == '/foo/bar/apple/orange'
     assert DummyDb(
-        's3://kinyu-demo/foo/bar')._get_full_path('apple/orange') == '/foo/bar/apple/orange'
+        's3://kinyu-demo/foo/bar')._get_full_path('apple/orange'
+                                                  ) == '/foo/bar/apple/orange'

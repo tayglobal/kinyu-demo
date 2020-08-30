@@ -7,7 +7,8 @@ import pytest
 
 @pytest.fixture
 def db():
-    return kydb.connect('redis://{}:6379'.format(os.environ['KINYU_UNITTEST_REDIS_HOST']))
+    return kydb.connect('redis://{}:6379'.format(
+        os.environ['KINYU_UNITTEST_REDIS_HOST']))
 
 
 def test_redis_basic(db):
