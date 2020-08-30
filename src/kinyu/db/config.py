@@ -4,5 +4,6 @@ DB_MODULES = {
     'dynamodb': 'DynamoDB',
     's3': 'S3DB',
     'http': 'HttpDB',
-    'https': 'HttpsDB'
+    'https': 'HttpsDB',
+    'files': 'FileDB'
 }
