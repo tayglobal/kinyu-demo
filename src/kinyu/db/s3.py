@@ -6,10 +6,6 @@ class S3DB(BaseDB):
 
     def __init__(self, url: str):
         super().__init__(url)
-        self.prefix = url
-        if not self.prefix.endswith('/'):
-            self.prefix += '/'
-
         self.fs = s3fs.S3FileSystem()
 
     def get_raw(self, key: str):

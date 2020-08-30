@@ -17,6 +17,7 @@ class IDB(ABC):
 
 class BaseDB(IDB):
     def __init__(self, url: str):
+        self.db_type = url.split(':', 1)[0]
         self.db_name, self.base_path = self._get_name_and_basepath(url)
         self.url = url
         self._cache = {}
