@@ -14,7 +14,7 @@ SRCDB = 'dynamodb://' + DYNAMODB
 def script_file():
     f = tempfile.NamedTemporaryFile('w', delete=False)
     f.close()
-    
+
     yield f.name
     os.remove(f.name)
 
@@ -28,17 +28,18 @@ def ff():
 
     with open(script_file, 'w') as f:
         f.write(script)
-        
+
     command = ["python", "-m", "kinyu.rimport.uploader",
-        "--srcdb=" + SRCDB,
-        "--key=" + key,
-        script_file]
-        
+               "--srcdb=" + SRCDB,
+               "--key=" + key,
+               script_file]
+
     with Popen(command, stdout=PIPE) as proc:
         output = proc.stdout.read()
-        
+
     assert proc.returncode == 0
-    assert output.decode('ascii') == f"Uploading {script_file} to {SRCDB}/{key}\n"
-    
+    assert output.decode(
+        'ascii') == f"Uploading {script_file} to {SRCDB}/{key}\n"
+
     ri = RemoteImporter(SRCDB)
     assert(ri.db[key]['code'] == script)
