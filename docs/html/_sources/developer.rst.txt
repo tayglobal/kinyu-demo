@@ -18,15 +18,6 @@ Unittest
 
 Please ensure all unittests passes before PR.
 
-Note that :ref:`kydb-page-ref` unittests does require certain dbs to be setup.
-You would need to set the following environment variables:
-
- * ``KINYU_UNITTEST_S3_BUCKET``: name of the S3 Bucket
- 
- * ``KINYU_UNITTEST_DYNAMODB``: name of the DynamoDB
- 
- * ``KINYU_UNITTEST_REDIS_HOST``: host of the redis server. Can also end with :port if non standard port. i.e. redis-host:8765
-
 Docker
 ------
 

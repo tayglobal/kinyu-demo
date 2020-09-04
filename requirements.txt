@@ -1,0 +1,11 @@
+boto3
+QuantLib
+pandas
+jupyterlab
+pytest
+redis
+matplotlib
+graphviz
+click
+watchdog
+sphinx

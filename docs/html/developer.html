@@ -44,15 +44,6 @@
 <div class="section" id="unittest">
 <h2>Unittest<a class="headerlink" href="#unittest" title="Permalink to this headline">¶</a></h2>
 <p>Please ensure all unittests passes before PR.</p>
-<p>Note that <a class="reference internal" href="kydb.html#kydb-page-ref"><span class="std std-ref">KYDB (Kinyu Database)</span></a> unittests does require certain dbs to be setup.
-You would need to set the following environment variables:</p>
-<blockquote>
-<div><ul class="simple">
-<li><p><code class="docutils literal notranslate"><span class="pre">KINYU_UNITTEST_S3_BUCKET</span></code>: name of the S3 Bucket</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">KINYU_UNITTEST_DYNAMODB</span></code>: name of the DynamoDB</p></li>
-<li><p><code class="docutils literal notranslate"><span class="pre">KINYU_UNITTEST_REDIS_HOST</span></code>: host of the redis server. Can also end with :port if non standard port. i.e. redis-host:8765</p></li>
-</ul>
-</div></blockquote>
 </div>
 <div class="section" id="docker">
 <h2>Docker<a class="headerlink" href="#docker" title="Permalink to this headline">¶</a></h2>
@@ -137,7 +128,6 @@ docker push <span class="m">499030764380</span>.dkr.ecr.eu-west-1.amazonaws.com/
 <h3>Navigation</h3>
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="main.html">Main</a></li>
-<li class="toctree-l1"><a class="reference internal" href="kydb.html">KYDB (Kinyu Database)</a></li>
 <li class="toctree-l1"><a class="reference internal" href="rimport.html">Remote Import</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Developer</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="#style-guide">Style Guide</a></li>

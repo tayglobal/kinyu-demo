@@ -1,4 +1,3 @@
-from kinyu.db.api import kydb
 from kinyu.rimport.api import RemoteImporter, rimp
 import os
 import tempfile

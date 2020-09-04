@@ -1,16 +1,12 @@
-import timeit
 import sys
-import importlib
 import types
 from importlib.abc import MetaPathFinder
 from importlib.machinery import ModuleSpec
-from datetime import datetime
-from kinyu.db.api import kydb
-from kinyu.db.base import IDB
+import kydb
 
 
 class RemoteFinder(MetaPathFinder):
-    def __init__(self, db: IDB):
+    def __init__(self, db):
         self.db = db
 
     def find_spec(self, fullname, path, target=None):
@@ -25,7 +21,9 @@ class RemoteFinder(MetaPathFinder):
 
     def create_module(self, spec):
         """
-        Module creator. Returning None causes Python to use the default module creator.
+        Module creator.
+
+        Returning None causes Python to use the default module creator.
         """
         name_parts = spec.name.split('.')
         module = types.ModuleType('.'.join(name_parts))

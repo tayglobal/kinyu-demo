@@ -1,13 +1,9 @@
 import click
-import sys
 import time
 import logging
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
-from kinyu.db.api import kydb
-from .api import rimp
-import logging
-import logging.handlers
+import kydb
 
 
 logger = logging.getLogger(__name__)
@@ -101,7 +97,8 @@ class CodeSync(FileSystemEventHandler):
 
 
 @click.command()
-@click.option('--recursive/--no-recursive', default=False, type=bool, help='Recursively watch subdirectories')
+@click.option('--recursive/--no-recursive', default=False,
+              type=bool, help='Recursively watch subdirectories')
 @click.option('--verbose/--no-verbose', default=False)
 @click.argument('srcdb')
 @click.argument('localpath', default='.', type=click.Path(exists=True))

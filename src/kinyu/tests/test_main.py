@@ -1,11 +1,10 @@
 from kinyu.rimport.api import RemoteImporter
 from subprocess import Popen, PIPE
-import os
 import pytest
 import json
 
-DYNAMODB = os.environ['KINYU_UNITTEST_DYNAMODB']
-SRCDB = 'dynamodb://' + DYNAMODB
+
+SRCDB = 'files://tmp/unittests/test_main'
 
 
 @pytest.fixture
