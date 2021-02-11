@@ -3,7 +3,7 @@
 This is a repository that contains interesting demos that can be applied in the financial industry. 
 
 See
-[Documentation](https://tayglobal.github.io/kinyu-demo/html)
+[Documentation](https://kydb.readthedocs.io)
 to find out more.
 
 ## Demos
