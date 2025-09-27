@@ -9,3 +9,5 @@ graphviz
 click
 watchdog
 sphinx
+frozendict
+setuptools-rust
