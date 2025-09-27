@@ -1,5 +1,7 @@
 # Kinyu Demos
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/tayglobal/kinyu-demo)
+
 This is a repository that contains interesting demos that can be applied in the financial industry. 
 
 See
