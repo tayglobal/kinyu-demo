@@ -73,7 +73,7 @@ updated to the previous step's spot price multiplied by the discount factor.【F
 This implements a piecewise-constant strike process $K_t$ defined by
 
 $$
-K_t = \text{strike\_discount} \times S\_{t^-}
+K\_t = \text{strike\_discount} \times S\_{t^-}
 $$
 
 whenever $t$ hits a new week boundary.
@@ -129,7 +129,7 @@ After stepping back to time zero, the Monte Carlo price is the average of the
 pathwise values $V_0^{(j)}$:
 
 $$
-\text{Price} = \frac{1}{N} \sum_{j=1}^{N} V_0^{(j)}
+\text{Price} = \frac{1}{N} \sum\_{j=1}^{N} V\_0^{(j)}
 $$
 
 The function returns this mean as the estimated fair value of the warrant.【F:src/kinyu/warrants/src/lib.rs†L206-L209】
