@@ -73,8 +73,9 @@ updated to the previous step's spot price multiplied by the discount factor.【F
 This implements a piecewise-constant strike process $K_t$ defined by
 
 $$
-K_t = \texttt{strike\_discount} \times S_{t^-}
+K_t = \mathtt{strike\_discount} \times S_{t^-}
 $$
+
 
 whenever $t$ hits a new week boundary.
 
@@ -85,8 +86,8 @@ At maturity, each path's payoff is determined by
 $$
 P_T = 
 \begin{cases}
-\text{recovery\_rate}, & \tau \leq T, \\
-\max(S_T - K_T, 0), & \text{otherwise},
+\mathtt{recovery\_rate}, & \tau \leq T, \\
+\max(S_T - K_T, 0), & \mathtt{otherwise},
 \end{cases}
 $$
 
@@ -107,14 +108,10 @@ During each step:
    building a Vandermonde matrix and applying the normal equations
    $(X^\top X) \beta = X^\top Y$.【F:src/kinyu/warrants/src/lib.rs†L84-L104】
 3. For each surviving path, discount the current continuation value and evaluate
-   the regression to obtain an estimate of the continuation value:
-
-   $$
-   C(S_t) = \sum_{d=0}^{D} \beta\_d S_t^d
-   $$
+   the regression to obtain an estimate of the continuation value: $C(S_t) = \sum_{d=0}^{D} \beta_d S_t^d$
 
    If the path is in the money, compare $C(S_t)$ with the issuer's buyback
-   price. Whenever $C(S_t) > \text{buyback\_price}$, the warrant value is
+   price. Whenever $C(S_t) > \mathtt{buyback\_price}$, the warrant value is
    capped at the buyback level to reflect the issuer exercising its call right; otherwise
    the value simply becomes the discounted continuation. Paths that are out of the
    money, or that have defaulted, also take the discounted continuation or the
