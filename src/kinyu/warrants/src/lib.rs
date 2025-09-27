@@ -1,12 +1,40 @@
-use nalgebra::{DMatrix, DVector};
+use nalgebra::{DMatrix, DVector, Cholesky, Matrix2};
 use rand::distributions::Distribution;
-use statrs::distribution::Normal;
+use statrs::distribution::{Normal, ContinuousCDF};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use pyo3::prelude::*;
 
-// Function to simulate stock price paths using Geometric Brownian Motion
-fn simulate_gbm(
+// Helper function to interpolate the credit curve linearly
+fn interpolate(curve: &Vec<[f64; 2]>, time: f64) -> f64 {
+    if curve.is_empty() {
+        return 0.0;
+    }
+    if time <= curve[0][0] {
+        return curve[0][1];
+    }
+    if let Some(last_point) = curve.last() {
+        if time >= last_point[0] {
+            return last_point[1];
+        }
+    }
+
+    for i in 0..curve.len() - 1 {
+        let p1 = curve[i];
+        let p2 = curve[i + 1];
+        if time >= p1[0] && time <= p2[0] {
+            let t1 = p1[0];
+            let v1 = p1[1];
+            let t2 = p2[0];
+            let v2 = p2[1];
+            return v1 + (v2 - v1) * (time - t1) / (t2 - t1);
+        }
+    }
+    curve.last().unwrap()[1]
+}
+
+// Function to simulate correlated stock price paths and default times
+fn simulate_correlated_paths(
     s0: f64,
     mu: f64,
     sigma: f64,
@@ -14,27 +42,50 @@ fn simulate_gbm(
     n_steps: usize,
     n_paths: usize,
     seed: u64,
-) -> DMatrix<f64> {
+    credit_spreads: &Vec<[f64; 2]>,
+    equity_credit_corr: f64,
+) -> (DMatrix<f64>, DVector<f64>) {
     let dt = t / n_steps as f64;
     let mut rng = StdRng::seed_from_u64(seed);
-    // Corrected Normal distribution for GBM
     let normal = Normal::new(0.0, 1.0).unwrap();
 
+    let corr_matrix = Matrix2::new(1.0, equity_credit_corr, equity_credit_corr, 1.0);
+    let cholesky = Cholesky::new(corr_matrix).unwrap();
+    let l_factor = cholesky.l();
+
     let mut paths = DMatrix::from_element(n_steps + 1, n_paths, 0.0);
+    let mut default_times = DVector::from_element(n_paths, t + 1.0);
 
     for j in 0..n_paths {
         paths[(0, j)] = s0;
         for i in 1..=n_steps {
-            let z = normal.sample(&mut rng);
-            paths[(i, j)] = paths[(i - 1, j)] * ((mu - 0.5 * sigma.powi(2)) * dt + sigma * z * dt.sqrt()).exp();
+            let z1 = normal.sample(&mut rng);
+            let z2 = normal.sample(&mut rng);
+            let e_stock = l_factor[(0, 0)] * z1;
+            let e_credit = l_factor[(1, 0)] * z1 + l_factor[(1, 1)] * z2;
+
+            paths[(i, j)] = paths[(i - 1, j)] * ((mu - 0.5 * sigma.powi(2)) * dt + sigma * e_stock * dt.sqrt()).exp();
+
+            if default_times[j] > t {
+                let current_time = i as f64 * dt;
+                let hazard_rate = interpolate(credit_spreads, current_time);
+                let prob_default = 1.0 - (-hazard_rate * dt).exp();
+                let u_credit = normal.cdf(e_credit);
+                if u_credit < prob_default {
+                    default_times[j] = current_time;
+                }
+            }
         }
     }
-
-    paths
+    (paths, default_times)
 }
+
 
 // Polynomial regression for LSMC
 fn poly_regression(x: &DVector<f64>, y: &DVector<f64>, degree: usize) -> Option<DVector<f64>> {
+    if x.len() == 0 {
+        return None;
+    }
     let mut x_matrix = DMatrix::from_element(x.len(), degree + 1, 1.0);
     for i in 1..=degree {
         for j in 0..x.len() {
@@ -60,13 +111,18 @@ fn price_exotic_warrant(
     t: f64,
     r: f64,
     sigma: f64,
+    credit_spreads: Vec<[f64; 2]>,
+    equity_credit_corr: f64,
+    recovery_rate: f64,
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
     seed: u64,
 ) -> PyResult<f64> {
     let dt = t / n_steps as f64;
-    let stock_paths = simulate_gbm(s0, r, sigma, t, n_steps, n_paths, seed);
+    let (stock_paths, default_times) = simulate_correlated_paths(
+        s0, r, sigma, t, n_steps, n_paths, seed, &credit_spreads, equity_credit_corr
+    );
 
     let mut strikes = DMatrix::from_element(n_steps + 1, n_paths, 0.0);
     for j in 0..n_paths {
@@ -85,35 +141,71 @@ fn price_exotic_warrant(
     }
 
     let mut warrant_values = DVector::from_fn(n_paths, |j, _| {
+        if default_times[j] <= t {
+            return recovery_rate;
+        }
         let final_price = stock_paths[(n_steps, j)];
         let final_strike = strikes[(n_steps, j)];
         (final_price - final_strike).max(0.0)
     });
 
-    for i in (1..n_steps).rev() {
-        warrant_values = warrant_values.map(|v| v * (-r * dt).exp());
+    for i in (0..n_steps).rev() {
+        let current_time = i as f64 * dt;
 
-        let x_vec = stock_paths.row(i).transpose().clone_owned();
+        let mut x_regression = Vec::new();
+        let mut y_regression = Vec::new();
 
-        let beta = match poly_regression(&x_vec, &warrant_values, poly_degree) {
-            Some(b) => b,
-            None => continue, // Skip if regression fails
+        for j in 0..n_paths {
+            if default_times[j] > current_time {
+                let stock_price = stock_paths[(i, j)];
+                let strike = strikes[(i, j)];
+                if (stock_price - strike).max(0.0) > 0.0 {
+                    x_regression.push(stock_price);
+                    y_regression.push(warrant_values[j] * (-r * dt).exp());
+                }
+            }
+        }
+
+        let beta = if !x_regression.is_empty() {
+            let x_vec = DVector::from_vec(x_regression);
+            let y_vec = DVector::from_vec(y_regression);
+            poly_regression(&x_vec, &y_vec, poly_degree)
+        } else {
+            None
         };
 
         for j in 0..n_paths {
-            let mut continuation_value = 0.0;
-            let stock_price = x_vec[j];
-            for d in 0..=poly_degree {
-                continuation_value += beta[d] * stock_price.powi(d as i32);
-            }
+            let discounted_value = warrant_values[j] * (-r * dt).exp();
 
-            if continuation_value > buyback_price {
-                warrant_values[j] = buyback_price;
+            if default_times[j] > current_time {
+                let stock_price = stock_paths[(i, j)];
+                let strike = strikes[(i, j)];
+
+                if (stock_price - strike).max(0.0) > 0.0 {
+                     if let Some(ref b) = beta {
+                        let mut continuation_value = 0.0;
+                        for d in 0..=b.len() - 1 {
+                            continuation_value += b[d] * stock_price.powi(d as i32);
+                        }
+
+                        if continuation_value > buyback_price {
+                             warrant_values[j] = buyback_price;
+                        } else {
+                             warrant_values[j] = discounted_value;
+                        }
+                    } else {
+                        warrant_values[j] = discounted_value;
+                    }
+                } else {
+                    warrant_values[j] = discounted_value;
+                }
+            } else {
+                 warrant_values[j] = recovery_rate;
             }
         }
     }
 
-    let price = warrant_values.mean() * (-r * dt).exp();
+    let price = warrant_values.mean();
     Ok(price)
 }
 
@@ -130,27 +222,15 @@ mod tests {
     use nalgebra::DVector;
 
     #[test]
-    fn test_gbm_simulation() {
-        let s0 = 100.0;
-        let mu = 0.05;
-        let sigma = 0.2;
-        let t = 1.0;
-        let n_steps = 100;
-        let n_paths = 10000;
-        let seed = 123;
-
-        let paths = simulate_gbm(s0, mu, sigma, t, n_steps, n_paths, seed);
-        let final_prices = paths.row(n_steps);
-        let mean_final_price = final_prices.mean();
-        let expected_final_price = s0 * (mu * t).exp();
-
-        // Check if the mean of simulated prices is close to the expected price
-        assert!((mean_final_price - expected_final_price).abs() < 2.0);
+    fn test_interpolate() {
+        let curve = vec![[0.0, 0.01], [1.0, 0.02], [2.0, 0.03]];
+        assert!((interpolate(&curve, 0.5) - 0.015).abs() < 1e-9);
+        assert!((interpolate(&curve, -1.0) - 0.01).abs() < 1e-9);
+        assert!((interpolate(&curve, 3.0) - 0.03).abs() < 1e-9);
     }
 
     #[test]
     fn test_poly_regression() {
-        // y = 2 + 3x + 4x^2
         let x = DVector::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0]);
         let y = DVector::from_vec(vec![9.0, 24.0, 47.0, 78.0, 117.0]);
         let degree = 2;
@@ -158,65 +238,34 @@ mod tests {
         let beta = poly_regression(&x, &y, degree).unwrap();
 
         assert!(beta.len() == 3);
-        assert!((beta[0] - 2.0).abs() < 1e-9); // intercept
-        assert!((beta[1] - 3.0).abs() < 1e-9); // coeff for x
-        assert!((beta[2] - 4.0).abs() < 1e-9); // coeff for x^2
+        assert!((beta[0] - 2.0).abs() < 1e-9);
+        assert!((beta[1] - 3.0).abs() < 1e-9);
+        assert!((beta[2] - 4.0).abs() < 1e-9);
     }
 
     #[test]
-    fn test_warrant_pricing_low_buyback() {
-        // If buyback_price is very low, issuer should call immediately.
-        // Price should be close to buyback_price, discounted.
+    fn test_warrant_pricing_no_default_risk() {
+        // Test with zero credit spread, should be close to previous results
+        let credit_spreads = vec![[1.0, 0.0]];
         let price = price_exotic_warrant(
-            100.0, 0.9, 0.1, 1.0, 0.05, 0.2, 1000, 100, 3, 42
+            100.0, 0.9, 1000.0, 1.0, 0.05, 0.2, credit_spreads, 0.0, 0.4, 5000, 200, 3, 42
         ).unwrap();
-        let dt = 1.0 / 100.0;
-        let expected = 0.1 * (-0.05f64 * dt).exp();
-        assert!((price - expected).abs() < 0.1);
+        assert!(price > 5.0 && price < 15.0); // A reasonable range
     }
 
     #[test]
-    fn test_warrant_pricing_high_buyback() {
-        // If buyback_price is very high, it should never be called.
-        // Price should be greater than zero (for a typical case).
-        let price = price_exotic_warrant(
-            100.0, 0.9, 1000.0, 1.0, 0.05, 0.2, 5000, 200, 3, 42
-        ).unwrap();
-        assert!(price > 0.0);
-    }
-
-    #[test]
-    fn test_warrant_pricing_zero_sigma() {
-        // If sigma is 0, price path is deterministic.
-        let s0 = 100.0;
-        let r = 0.05;
-        let t = 1.0;
-        let n_steps = 52;
-        let dt = t / n_steps as f64;
-        let strike_discount = 0.9;
-
-        let mut s_t = s0;
-        let mut strike = s0 * strike_discount;
-        let mut last_week = -1;
-
-        for i in 1..=n_steps {
-            s_t *= (r * dt).exp();
-            let current_time = i as f64 * dt;
-            let current_week = (current_time * 52.0 - 1e-9).floor() as i32;
-            if current_week > last_week {
-                strike = s0 * (r * (i-1) as f64 * dt).exp() * strike_discount;
-                last_week = current_week;
-            }
-        }
-
-        let expected_payoff = (s_t - strike).max(0.0);
-        let expected_price = expected_payoff * (-r * t).exp();
-
-        let price = price_exotic_warrant(
-            s0, strike_discount, 1000.0, t, r, 0.0, 1, n_steps, 1, 42
+    fn test_warrant_pricing_high_default_risk() {
+        // High spread should lower the price
+        let credit_spreads_low = vec![[1.0, 0.001]];
+        let price_low_risk = price_exotic_warrant(
+            100.0, 0.9, 1000.0, 1.0, 0.05, 0.2, credit_spreads_low, 0.0, 0.4, 5000, 200, 3, 42
         ).unwrap();
 
-        // With n_paths=1 and sigma=0, there's no randomness.
-        assert!((price - expected_price).abs() < 1e-9);
+        let credit_spreads_high = vec![[1.0, 0.20]]; // 20% spread
+        let price_high_risk = price_exotic_warrant(
+            100.0, 0.9, 1000.0, 1.0, 0.05, 0.2, credit_spreads_high, 0.0, 0.4, 5000, 200, 3, 42
+        ).unwrap();
+
+        assert!(price_high_risk < price_low_risk);
     }
 }

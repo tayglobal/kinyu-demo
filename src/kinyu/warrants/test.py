@@ -12,39 +12,52 @@ n_steps = 252
 poly_degree = 4
 seed = 42
 
-# Price the warrant
+# Credit-related parameters
+credit_spreads_low = [[t, 0.01] for t in range(1, 6)]  # Low credit spread
+credit_spreads_high = [[t, 0.20] for t in range(1, 6)] # High credit spread
+equity_credit_corr = -0.5 # Negative correlation is typical
+recovery_rate = 0.4
+
+print("--- Running Integration Tests for Exotic Warrant Pricer ---")
+
 try:
-    price = warrants.price_exotic_warrant(
-        s0,
-        strike_discount,
-        buyback_price,
-        t,
-        r,
-        sigma,
-        n_paths,
-        n_steps,
-        poly_degree,
-        seed,
+    # --- Test 1: Pricing with low credit risk ---
+    price_low_risk = warrants.price_exotic_warrant(
+        s0, strike_discount, buyback_price, t, r, sigma,
+        credit_spreads_low, equity_credit_corr, recovery_rate,
+        n_paths, n_steps, poly_degree, seed
     )
-    print(f"The price of the exotic warrant is: {price}")
+    print(f"\n[Test 1] Price with LOW credit risk: {price_low_risk:.6f}")
+    assert price_low_risk > 0, "Price with low risk should be positive"
 
-    # Test with high buyback price (should be higher than low buyback)
+    # --- Test 2: Pricing with high credit risk ---
+    price_high_risk = warrants.price_exotic_warrant(
+        s0, strike_discount, buyback_price, t, r, sigma,
+        credit_spreads_high, equity_credit_corr, recovery_rate,
+        n_paths, n_steps, poly_degree, seed
+    )
+    print(f"[Test 2] Price with HIGH credit risk: {price_high_risk:.6f}")
+    assert price_high_risk < price_low_risk, "High credit risk should lower the price"
+
+    # --- Test 3: Pricing with zero correlation ---
+    price_zero_corr = warrants.price_exotic_warrant(
+        s0, strike_discount, buyback_price, t, r, sigma,
+        credit_spreads_low, 0.0, recovery_rate, # Zero correlation
+        n_paths, n_steps, poly_degree, seed
+    )
+    print(f"[Test 3] Price with ZERO correlation: {price_zero_corr:.6f}")
+    assert abs(price_zero_corr - price_low_risk) > 1e-3, "Correlation should impact the price"
+
+    # --- Test 4: Pricing with high buyback price (less likely to be called) ---
     price_high_buyback = warrants.price_exotic_warrant(
-        s0,
-        strike_discount,
-        1000.0, # High buyback, should not be exercised
-        t,
-        r,
-        sigma,
-        n_paths,
-        n_steps,
-        poly_degree,
-        seed,
+        s0, strike_discount, 1000.0, t, r, sigma, # High buyback
+        credit_spreads_low, equity_credit_corr, recovery_rate,
+        n_paths, n_steps, poly_degree, seed
     )
-    print(f"Price with high buyback price: {price_high_buyback}")
-    assert price < price_high_buyback
+    print(f"[Test 4] Price with HIGH buyback price: {price_high_buyback:.6f}")
+    assert price_high_buyback > price_low_risk, "Higher buyback price should increase the warrant value"
 
-    print("\nIntegration test successful!")
+    print("\n--- All integration tests passed successfully! ---")
 
 except Exception as e:
-    print(f"An error occurred: {e}")
+    print(f"\n--- An error occurred during testing: {e} ---")
