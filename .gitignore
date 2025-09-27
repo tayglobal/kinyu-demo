@@ -1,3 +1,25 @@
-backup.sh
-**/.ipynb_checkpoints
-**/__pycache__
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+build/
+dist/
+*.egg-info/
+wheels/
+.pytest_cache/
+.env
+
+# Rust
+/target/
+Cargo.lock
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Other
+*.log
