@@ -73,7 +73,7 @@ updated to the previous step's spot price multiplied by the discount factor.【F
 This implements a piecewise-constant strike process $K_t$ defined by
 
 $$
-K_t = \text{strike\_discount} \times S_{t^-}
+K_t = \text{strike\_discount} \times S\_{t^-}
 $$
 
 whenever $t$ hits a new week boundary.
@@ -83,10 +83,10 @@ whenever $t$ hits a new week boundary.
 At maturity, each path's payoff is determined by
 
 $$
-P_T = 
+P\_T = 
 \begin{cases}
 \text{recovery\_rate}, & \tau \leq T, \\
-\max(S_T - K_T, 0), & \text{otherwise},
+\max(S\_T - K\_T, 0), & \text{otherwise},
 \end{cases}
 $$
 
@@ -110,7 +110,7 @@ During each step:
    the regression to obtain an estimate of the continuation value:
 
    $$
-   C(S_t) = \sum_{d=0}^{D} \beta_d S_t^d
+   C(S\_t) = \sum\_{d=0}^{D} \beta\_d S\_t^d
    $$
 
    If the path is in the money, compare $C(S_t)$ with the issuer's buyback
