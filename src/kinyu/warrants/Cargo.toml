@@ -5,10 +5,10 @@ edition = "2021"
 
 [lib]
 name = "warrants"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 nalgebra = "0.32.3"
 rand = "0.8.5"
 statrs = "0.17.0"
-pyo3 = { version = "0.20.0", features = ["extension-module"] }
+pyo3 = { version = "0.20.0", features = ["extension-module", "auto-initialize"] }

@@ -30,35 +30,35 @@ simulation and backward induction steps described below.【F:src/kinyu/warrants/
 
 Credit spreads are provided as discrete term points and interpolated linearly to
 obtain the hazard rate at any simulation time. For a curve defined by points
-`(t_i, λ_i)`, the interpolated hazard at time \( t \) is
+$(t_i, λ_i)$, the interpolated hazard at time $t$ is
 
-\[
+$$
 \lambda(t) = \lambda_i + (\lambda_{i+1} - \lambda_i) \frac{t - t_i}{t_{i+1} - t_i}
-\]
+$$
 
-for \( t \in [t_i, t_{i+1}] \). Values outside the supplied range clamp to the
+for $t \in [t_i, t_{i+1}]$. Values outside the supplied range clamp to the
 nearest endpoint.【F:src/kinyu/warrants/src/lib.rs†L8-L34】
 
 ## Correlated Equity and Credit Simulation
 
 `simulate_correlated_paths` generates joint equity and credit scenarios over the
-lattice of `n_steps` with step size \( \Delta t = T / n_{steps} \).【F:src/kinyu/warrants/src/lib.rs†L36-L81】 The procedure is:
+lattice of `n_steps` with step size $\Delta t = T / n_{steps}$.【F:src/kinyu/warrants/src/lib.rs†L36-L81】 The procedure is:
 
 1. Build a 2×2 correlation matrix and take its Cholesky factor to couple a pair
-   of standard normal draws \( Z_1, Z_2 \). The resulting correlated shocks are
-   \( ε^S = L_{00} Z_1 \) for equity and \( ε^C = L_{10} Z_1 + L_{11} Z_2 \) for credit.【F:src/kinyu/warrants/src/lib.rs†L52-L66】
+   of standard normal draws $Z_1, Z_2$. The resulting correlated shocks are
+   $ε^S = L_{00} Z_1$ for equity and $ε^C = L_{10} Z_1 + L_{11} Z_2$ for credit.【F:src/kinyu/warrants/src/lib.rs†L52-L66】
 2. Simulate the stock price with a geometric Brownian motion under the
    risk-neutral measure:
 
-   \[
+   $$
    S_{t+Δ t} = S_t \exp\left( (r - \tfrac{1}{2} σ^2)Δ t + σ ε^S \sqrt{Δ t} \right).
-   \]
+   $$
 
    This evolves each path column in the `paths` matrix.【F:src/kinyu/warrants/src/lib.rs†L59-L68】
-3. At each step, compute the default probability over \( Δ t \) using the
-   interpolated hazard rate: \( p_{default} = 1 - e^{-λ(t) Δ t} \). Draw a
-   correlated uniform variate via the standard normal CDF, \( U = Φ(ε^C) \), and
-   register the first step where \( U < p_{default} \) as the default time for the path.【F:src/kinyu/warrants/src/lib.rs†L69-L76】
+3. At each step, compute the default probability over $\Delta t$ using the
+   interpolated hazard rate: $p_{default} = 1 - e^{-λ(t) Δ t}$. Draw a
+   correlated uniform variate via the standard normal CDF, $U = Φ(ε^C)$, and
+   register the first step where $U < p_{default}$ as the default time for the path.【F:src/kinyu/warrants/src/lib.rs†L69-L76】
 
 Paths that never default are assigned a default time later than maturity to keep
 post-processing simple.【F:src/kinyu/warrants/src/lib.rs†L56-L80】
@@ -70,27 +70,27 @@ reflect the weekly reset rule. The strike at the start is `s0 * strike_discount`
 and every time the simulation crosses into a new (discrete) week the strike is
 updated to the previous step's spot price multiplied by the discount factor.【F:src/kinyu/warrants/src/lib.rs†L127-L140】
 
-This implements a piecewise-constant strike process \( K_t \) defined by
+This implements a piecewise-constant strike process $K_t$ defined by
 
-\[
+$$
 K_t = \text{strike\_discount} \times S_{t^-}
-\]
+$$
 
-whenever \( t \) hits a new week boundary.
+whenever $t$ hits a new week boundary.
 
 ## Payoff Structure
 
 At maturity, each path's payoff is determined by
 
-\[
+$$
 P_T = 
 \begin{cases}
 \text{recovery\_rate}, & \tau \leq T, \\
 \max(S_T - K_T, 0), & \text{otherwise},
 \end{cases}
-\]
+$$
 
-where \( \tau \) is the default time. This seeds the vector of terminal warrant
+where $\tau$ is the default time. This seeds the vector of terminal warrant
 values for the backward induction.【F:src/kinyu/warrants/src/lib.rs†L143-L150】
 
 ## Least Squares Monte Carlo Backward Induction
@@ -98,27 +98,27 @@ values for the backward induction.【F:src/kinyu/warrants/src/lib.rs†L143-L150
 The algorithm then rolls back from the penultimate time step to the origin.
 During each step:
 
-1. Gather in-the-money, surviving paths (\( S_t > K_t \) and \( \tau > t \)). For
-   these paths, compute discounted future values \( Y_j = V_{t+Δ t}^{(j)} e^{-r Δ t} \).
+1. Gather in-the-money, surviving paths ($S_t > K_t$ and $\tau > t$). For
+   these paths, compute discounted future values $Y_j = V_{t+Δ t}^{(j)} e^{-r Δ t}$.
    These serve as the dependent variable in a polynomial regression on the spot
-   price \( X_j = S_t^{(j)} \).【F:src/kinyu/warrants/src/lib.rs†L152-L175】
+   price $X_j = S_t^{(j)}$.【F:src/kinyu/warrants/src/lib.rs†L152-L175】
 2. Fit a least-squares polynomial of degree `poly_degree` to approximate the
-   conditional expectation \( E[V_{t+Δ t} e^{-r Δ t} \,|\, S_t] \). This is solved by
+   conditional expectation $E[V_{t+Δ t} e^{-r Δ t} \,|\, S_t]$. This is solved by
    building a Vandermonde matrix and applying the normal equations
-   \( (X^\top X) \beta = X^\top Y \).【F:src/kinyu/warrants/src/lib.rs†L84-L104】
+   $(X^\top X) \beta = X^\top Y$.【F:src/kinyu/warrants/src/lib.rs†L84-L104】
 3. For each surviving path, discount the current continuation value and evaluate
    the regression to obtain an estimate of the continuation value:
 
-   \[
+   $$
    C(S_t) = \sum_{d=0}^{D} \beta_d S_t^d.
-   \]
+   $$
 
-   If the path is in the money, compare \( C(S_t) \) with the issuer's buyback
-   price. Whenever \( C(S_t) > \text{buyback\_price} \), the warrant value is
+   If the path is in the money, compare $C(S_t)$ with the issuer's buyback
+   price. Whenever $C(S_t) > \text{buyback\_price}$, the warrant value is
    capped at the buyback level to reflect the issuer exercising its call right; otherwise
    the value simply becomes the discounted continuation. Paths that are out of the
-   money, or that have defaulted, also take the discounted continuation or the
-   recovery payoff, respectively.【F:src/kinyu/warrants/src/lib.rs†L177-L205】
+   money take the discounted continuation value. If a path has defaulted at a
+   prior step, its value becomes the `recovery_rate`.【F:src/kinyu/warrants/src/lib.rs†L177-L205】
 
 The regression is recalibrated at every step to capture the path-dependent
 strike and correlated credit dynamics.
@@ -126,17 +126,17 @@ strike and correlated credit dynamics.
 ## Final Price Estimate
 
 After stepping back to time zero, the Monte Carlo price is the average of the
-pathwise values \( V_0^{(j)} \):
+pathwise values $V_0^{(j)}$:
 
-\[
+$$
 \text{Price} = \frac{1}{N} \sum_{j=1}^{N} V_0^{(j)}.
-\]
+$$
 
 The function returns this mean as the estimated fair value of the warrant.【F:src/kinyu/warrants/src/lib.rs†L206-L209】
 
 ## Summary of Risk Features
 
-- **Equity dynamics:** risk-neutral GBM with volatility \( σ \).
+- **Equity dynamics:** risk-neutral GBM with volatility $σ$.
 - **Credit risk:** reduced-form default with stochastic hazard interpolated from
   `credit_spreads` and correlated to equity shocks.
 - **Strike path dependence:** weekly reset proportional to the most recent spot.
@@ -145,3 +145,46 @@ The function returns this mean as the estimated fair value of the warrant.【F:s
 
 Together, these components allow the module to capture a complex, callable
 warrant structure with both market and credit risk drivers.
+
+---
+
+## Appendix: Swap Pricing Example from `curve_builder`
+
+While this document focuses on warrant pricing, the parent `kinyu` library also contains a `curve_builder` for general interest rate curve construction and swap pricing. The following is a summary of the `swap_pricing.rs` example, which demonstrates its usage.
+
+The example performs two main tasks:
+1.  **Builds a Yield Curve**: It takes a set of market instruments (OIS, FRAs, and Swaps) and uses a global optimization routine to construct a smooth, consistent yield curve.
+2.  **Prices an Interest Rate Swap**: It uses the resulting curve to calculate the Net Present Value (NPV) of a 3-year, 2.1% fixed-rate interest rate swap.
+
+### Example Output
+
+Executing `cargo run --example swap_pricing` in the `src/kinyu/rates/curve_builder` directory produces the following output, showing the optimized zero rates and the final swap NPV:
+
+```text
+--- Building Curve with Global Optimization ---
+
+--- Globally Optimized Discount Curve ---
+Base Date: 2023-01-01
+Pillar Dates: [2023-02-01, 2023-04-01, 2023-07-01, 2023-10-01, 2024-01-01, 2025-01-01, 2028-01-01]
+Optimized Zero Rates:
+  Date: 2023-01-01, Zero Rate: 0.499896%
+  Date: 2023-02-01, Zero Rate: 0.499896%
+  Date: 2023-04-01, Zero Rate: 0.599556%
+  Date: 2023-07-01, Zero Rate: 0.674842%
+  Date: 2023-10-01, Zero Rate: 0.716748%
+  Date: 2024-01-01, Zero Rate: 0.998340%
+  Date: 2025-01-01, Zero Rate: 1.499291%
+  Date: 2028-01-01, Zero Rate: 2.005872%
+----------------------------------------
+
+--- Pricing a 3-Year Interest Rate Swap ---
+Start Date: 2023-01-01
+End Date: 2026-01-01
+Fixed Rate: 2.1%
+-------------------------------------------
+
+--- Swap Pricing Result ---
+The NPV of the swap is: -0.012636
+This is favorable to the fixed-rate payer / floating-rate receiver.
+---------------------------
+```

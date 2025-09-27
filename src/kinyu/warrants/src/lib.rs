@@ -248,7 +248,7 @@ mod tests {
         // Test with zero credit spread, should be close to previous results
         let credit_spreads = vec![[1.0, 0.0]];
         let price = price_exotic_warrant(
-            100.0, 0.9, 1000.0, 1.0, 0.05, 0.2, credit_spreads, 0.0, 0.4, 5000, 200, 3, 42
+            100.0, 0.9, 15.0, 1.0, 0.05, 0.2, credit_spreads, 0.0, 0.4, 5000, 200, 3, 42
         ).unwrap();
         assert!(price > 5.0 && price < 15.0); // A reasonable range
     }
