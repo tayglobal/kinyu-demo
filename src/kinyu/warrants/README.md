@@ -73,7 +73,7 @@ updated to the previous step's spot price multiplied by the discount factor.【F
 This implements a piecewise-constant strike process $K_t$ defined by
 
 $$
-K\_t = \text{strike\_discount} \times S\_{t^-}
+K_t = \texttt{strike_discount} \times S_{t^-}
 $$
 
 whenever $t$ hits a new week boundary.
