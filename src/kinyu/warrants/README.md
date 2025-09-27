@@ -73,7 +73,7 @@ updated to the previous step's spot price multiplied by the discount factor.【F
 This implements a piecewise-constant strike process $K_t$ defined by
 
 $$
-K_t = \texttt{strike_discount} \times S_{t^-}
+K_t = \texttt{strike\_discount} \times S_{t^-}
 $$
 
 whenever $t$ hits a new week boundary.
@@ -83,10 +83,10 @@ whenever $t$ hits a new week boundary.
 At maturity, each path's payoff is determined by
 
 $$
-P\_T = 
+P_T = 
 \begin{cases}
 \text{recovery\_rate}, & \tau \leq T, \\
-\max(S\_T - K\_T, 0), & \text{otherwise},
+\max(S_T - K_T, 0), & \text{otherwise},
 \end{cases}
 $$
 
@@ -110,7 +110,7 @@ During each step:
    the regression to obtain an estimate of the continuation value:
 
    $$
-   C(S\_t) = \sum\_{d=0}^{D} \beta\_d S\_t^d
+   C(S_t) = \sum_{d=0}^{D} \beta\_d S_t^d
    $$
 
    If the path is in the money, compare $C(S_t)$ with the issuer's buyback
@@ -129,7 +129,7 @@ After stepping back to time zero, the Monte Carlo price is the average of the
 pathwise values $V_0^{(j)}$:
 
 $$
-\text{Price} = \frac{1}{N} \sum\_{j=1}^{N} V\_0^{(j)}
+\text{Price} = \frac{1}{N} \sum_{j=1}^{N} V_0^{(j)}
 $$
 
 The function returns this mean as the estimated fair value of the warrant.【F:src/kinyu/warrants/src/lib.rs†L206-L209】
