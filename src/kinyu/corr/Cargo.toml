@@ -1,0 +1,14 @@
+[package]
+name = "corr"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "corr"
+crate-type = ["cdylib"]
+
+[dependencies]
+nalgebra = "0.32"
+chrono = "0.4"
+statrs = "0.17"
+pyo3 = { version = "0.21.0", features = ["extension-module"] }
