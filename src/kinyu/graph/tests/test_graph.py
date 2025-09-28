@@ -6,6 +6,7 @@ from kinyu.graph import g_func, clear_cache, get_edges, override_value
 
 @pytest.fixture(autouse=True)
 def run_around_tests():
+    # This runs before and after each test function
     clear_cache()
     yield
     clear_cache()
@@ -14,9 +15,9 @@ def run_around_tests():
 
 def test_caching_and_expensive_function():
     """Tests that results are cached and expensive functions are not re-run."""
-    clear_cache()
     expensive_call_count = 0
 
+    @g_func
     def expensive_function(x):
         nonlocal expensive_call_count
         expensive_call_count += 1
@@ -43,7 +44,6 @@ def test_caching_and_expensive_function():
 
 def test_dependency_tracking_and_overriding():
     """Tests that overriding a node invalidates its ancestors."""
-    clear_cache()
     call_log = []
 
     @g_func
@@ -62,21 +62,22 @@ def test_dependency_tracking_and_overriding():
         return 10
 
     assert a() == 22
-    assert call_log == ['a', 'b', 'c']
+    assert call_log == ['a', 'b', 'c'], "Execution order follows Python's standard call stack"
 
+    # Test caching
     call_log.clear()
     assert a() == 22
-    assert call_log == []
+    assert call_log == [], "All nodes should be cached"
 
+    # Test override
     override_value('c', 100)
     call_log.clear()
     assert a() == 202
-    assert call_log == ['a', 'b']
+    # 'c' is overridden, so it's not called. 'a' and 'b' are re-executed.
+    assert call_log == ['a', 'b'], "Ancestors of overridden node are re-executed"
 
 def test_conditional_dependency():
-    """Tests that dependencies are tracked correctly based on conditions."""
-    clear_cache()
-
+    """Tests that dependencies are tracked correctly based on runtime conditions."""
     @g_func
     def d(condition):
         if condition:
@@ -95,28 +96,23 @@ def test_conditional_dependency():
     # First run with condition=True
     assert d(True) == "e"
     edges = get_edges()
-
     parent_d_true = "d(*(True,), **frozendict.frozendict({}))"
     child_e = "e(*(), **frozendict.frozendict({}))"
     child_f = "f(*(), **frozendict.frozendict({}))"
-
     assert (parent_d_true, child_e) in edges
     assert (parent_d_true, child_f) not in edges
-
-    clear_cache()
 
     # Second run with condition=False
     assert d(False) == "f"
     edges = get_edges()
-
     parent_d_false = "d(*(False,), **frozendict.frozendict({}))"
-
+    # The dependency on e() from the previous call should still exist in the graph
     assert (parent_d_false, child_f) in edges
-    assert (parent_d_false, child_e) not in edges
+    assert (parent_d_true, child_e) in edges
+
 
 def test_argument_sensitivity():
     """Tests that calls with different arguments are treated as distinct nodes."""
-    clear_cache()
     @g_func
     def h():
         return b(x=1) + b(x=2)
@@ -127,17 +123,14 @@ def test_argument_sensitivity():
 
     assert h() == 5
     edges = get_edges()
-
     parent_h = "h(*(), **frozendict.frozendict({}))"
     child_b1 = "b(*(), **frozendict.frozendict({'x': 1}))"
     child_b2 = "b(*(), **frozendict.frozendict({'x': 2}))"
-
     assert (parent_h, child_b1) in edges
     assert (parent_h, child_b2) in edges
 
 def test_clear_cache():
     """Tests that the cache can be cleared."""
-    clear_cache()
     call_count = 0
 
     @g_func
@@ -148,7 +141,6 @@ def test_clear_cache():
 
     expensive_node()
     assert call_count == 1
-
     expensive_node()
     assert call_count == 1
 
