@@ -15,9 +15,9 @@ Cargo.lock
 target/
 
 # Ignore WebAssembly build artifacts
-pkg/
-wasm-build/
-*.wasm
+src/**/pkg/
+src/**/wasm-build/
+src/**/*.wasm
 
 # Ignore virtual environment
 .venv/

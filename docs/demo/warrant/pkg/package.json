@@ -1,0 +1,12 @@
+{
+  "name": "warrants-wasm",
+  "version": "0.1.0",
+  "files": [
+    "warrants_wasm_bg.wasm",
+    "warrants_wasm.js",
+    "warrants_wasm.d.ts"
+  ],
+  "module": "warrants_wasm.js",
+  "types": "warrants_wasm.d.ts",
+  "sideEffects": false
+}
