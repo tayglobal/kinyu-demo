@@ -1,0 +1,19 @@
+[package]
+name = "kinyu-historical"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nalgebra = "0.32"
+chrono = "0.4"
+statrs = "0.16"
+pyo3 = { version = "0.20", features = ["extension-module"] }
+numpy = "0.20"
+
+
+[dev-dependencies]
+approx = "0.5"
+
+[lib]
+name = "kinyu_historical"
+crate-type = ["cdylib", "rlib"]
