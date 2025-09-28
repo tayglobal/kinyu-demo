@@ -163,5 +163,117 @@ class TestStaticCalcGraph(unittest.TestCase):
         self.assertEqual(obj_b.call_count_k, 1)
         self.assertEqual(obj_b.call_count_l, 1)
 
+
+class TestEdgeNodeCalcGraph(unittest.TestCase):
+
+    def setUp(self):
+        graph.clear()
+
+    def test_conditional_edge_node_shapes(self):
+        class ConditionalCalc:
+            def __init__(self, threshold):
+                self.threshold = threshold
+
+            @calc_node
+            def Foo(self):
+                return self.threshold
+
+            @calc_node
+            def A(self):
+                return 'A'
+
+            @calc_node
+            def B(self):
+                return 'B'
+
+            @calc_node
+            def Root(self):
+                if self.Foo() > 3:
+                    return self.A()
+                else:
+                    return self.B()
+
+        calc = ConditionalCalc(5)
+        self.assertEqual(calc.Root(), 'A')
+
+        summary = ConditionalCalc.Root.describe_dependencies(calc)
+        self.assertCountEqual([node.name for node in summary['edge_nodes']], ['Foo'])
+        self.assertCountEqual([node.name for node in summary['input_nodes']], ['A'])
+        self.assertCountEqual([node.name for node in summary['predicate_nodes']], ['B'])
+
+        calc.threshold = 1
+        ConditionalCalc.Foo.invalidate(calc)
+        self.assertEqual(calc.Root(), 'B')
+
+        summary = ConditionalCalc.Root.describe_dependencies(calc)
+        self.assertCountEqual([node.name for node in summary['edge_nodes']], ['Foo'])
+        self.assertCountEqual([node.name for node in summary['input_nodes']], ['B'])
+        self.assertCountEqual([node.name for node in summary['predicate_nodes']], ['A'])
+
+    def test_dynamic_edge_node_dispatch(self):
+        class Alpha:
+            def __init__(self, label):
+                self.label = label
+
+            @calc_node
+            def Bar(self):
+                return f"alpha-{self.label}"
+
+        class Beta:
+            def __init__(self, label):
+                self.label = label
+
+            @calc_node
+            def Bar(self):
+                return f"beta-{self.label}"
+
+        class DynamicCalc:
+            def __init__(self):
+                self.use_alpha = True
+                self.alpha = Alpha('value')
+                self.beta = Beta('value')
+
+            @calc_node
+            def Foo(self):
+                if self.use_alpha:
+                    return self.alpha
+                return self.beta
+
+            @calc_node
+            def Output(self):
+                return self.Foo().Bar()
+
+        calc = DynamicCalc()
+        self.assertEqual(calc.Output(), 'alpha-value')
+
+        summary = DynamicCalc.Output.describe_dependencies(calc)
+        self.assertEqual(len(summary['edge_nodes']), 1)
+        self.assertIs(summary['edge_nodes'][0].instance, calc)
+        self.assertEqual(summary['edge_nodes'][0].name, 'Foo')
+
+        self.assertEqual(len(summary['input_nodes']), 1)
+        self.assertIs(summary['input_nodes'][0].instance, calc.alpha)
+        self.assertEqual(summary['input_nodes'][0].name, 'Bar')
+        self.assertEqual(len(summary['predicate_nodes']), 0)
+
+        # Setting Foo() to a different object should change the graph shape.
+        calc.Foo.set_value(calc.beta)
+        self.assertEqual(calc.Output(), 'beta-value')
+
+        summary = DynamicCalc.Output.describe_dependencies(calc)
+        self.assertIs(summary['input_nodes'][0].instance, calc.beta)
+        self.assertIn(Alpha.Bar._get_node(calc.alpha), summary['predicate_nodes'])
+
+        # When Foo() uses a conditional, toggling the condition changes the shape as well.
+        calc.use_alpha = False
+        calc.Foo.invalidate()
+        calc.Output.invalidate()
+        self.assertEqual(calc.Output(), 'beta-value')
+
+        summary = DynamicCalc.Output.describe_dependencies(calc)
+        self.assertIs(summary['input_nodes'][0].instance, calc.beta)
+        self.assertIn(Alpha.Bar._get_node(calc.alpha), summary['predicate_nodes'])
+
+
 if __name__ == '__main__':
     unittest.main()
