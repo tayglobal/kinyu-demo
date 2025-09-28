@@ -147,6 +147,35 @@ class TestStaticCalcGraph(unittest.TestCase):
         self.assertEqual(b(), 7)
         self.assertEqual(call_counts['b'], 1)
 
+    def test_nested_calc_context_override(self):
+        """Tests that overrides in nested contexts work correctly."""
+        call_counts = {'c': 0}
+
+        @calc_node
+        def c():
+            call_counts['c'] += 1
+            return 10  # Original value
+
+        c.set_value(20)  # Set a new "original" value
+
+        self.assertEqual(c(), 20)
+        self.assertEqual(call_counts['c'], 0)
+
+        with calc_context():
+            c.override(30)
+            self.assertEqual(c(), 30)
+
+            with calc_context():
+                c.override(40)
+                self.assertEqual(c(), 40)
+
+            # After exiting inner context, should revert to outer context's override
+            self.assertEqual(c(), 30)
+
+        # After exiting all contexts, should revert to the original value
+        self.assertEqual(c(), 20)
+        self.assertEqual(call_counts['c'], 0)
+
     def test_calc_context_set_value_sticky(self):
         call_counts = {'c': 0}
 
@@ -185,6 +214,39 @@ class TestStaticCalcGraph(unittest.TestCase):
             self.assertEqual(foo(), 5)
 
         self.assertEqual(foo(), 3)
+
+    def test_nested_calc_layer_override(self):
+        """Tests that overrides in nested layers work correctly."""
+        @calc_node
+        def bar():
+            return 100  # Original value
+
+        bar.set_value(200)  # Set a new "original" value
+
+        outer_layer = calc_layer(name="outer")
+        inner_layer = calc_layer(name="inner")
+
+        self.assertEqual(bar(), 200)
+
+        with outer_layer:
+            bar.override(300)
+            self.assertEqual(bar(), 300)
+
+            with inner_layer:
+                bar.override(400)
+                self.assertEqual(bar(), 400)
+
+            # After exiting inner layer, should revert to outer layer's override
+            self.assertEqual(bar(), 300)
+
+        # After exiting all layers, should revert to the original value
+        self.assertEqual(bar(), 200)
+
+        # Re-entering the layers should still use their persistent overrides
+        with outer_layer:
+            self.assertEqual(bar(), 300)
+            with inner_layer:
+                self.assertEqual(bar(), 400)
 
     def test_calc_layer_multiple_layers(self):
         @calc_node
