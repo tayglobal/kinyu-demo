@@ -153,21 +153,24 @@ warrant structure with both market and credit risk drivers.
 
 ### Building the Extension
 
-1. Install maturin:
-   ```bash
-   pip3 install maturin
-   ```
+Install maturin:
 
-2. Build the Rust extension:
-   ```bash
-   cd src/kinyu/warrants
-   maturin build
-   ```
+```bash
+pip3 install maturin
+```
 
-3. Install the built wheel:
-   ```bash
-   pip3 install target/wheels/warrants-0.1.0-cp312-cp312-*.whl
-   ```
+Build the Rust extension:
+
+```bash
+cd src/kinyu/warrants
+maturin build
+```
+
+Install the built wheel:
+
+```bash
+pip3 install target/wheels/warrants-0.1.0-cp312-cp312-*.whl
+```
 
 ### Running the Tests
 
