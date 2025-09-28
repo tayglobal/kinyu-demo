@@ -379,6 +379,23 @@ impl SVIVolatilitySlice {
 }
 
 
+#[pyfunction]
+fn black_scholes_price_py(
+    spot: f64,
+    strike: f64,
+    risk_free_rate: f64,
+    time_to_expiry: f64,
+    volatility: f64,
+    option_type: OptionType,
+) -> f64 {
+    pricing::black_scholes_price(spot, strike, risk_free_rate, time_to_expiry, volatility, option_type)
+}
+
+#[pyfunction]
+fn implied_volatility_py(option_data: &OptionData, market_price: f64) -> PyResult<f64> {
+    pricing::implied_volatility(option_data, market_price).map_err(|e| PyCalibrationError::new_err(e))
+}
+
 #[pymodule]
 fn implied(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<OptionType>()?;
@@ -386,6 +403,8 @@ fn implied(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<SVIParameters>()?;
     m.add_class::<SVIVolatilitySurface>()?;
     m.add("CalibrationError", _py.get_type::<PyCalibrationError>())?;
+    m.add_function(wrap_pyfunction!(black_scholes_price_py, m)?)?;
+    m.add_function(wrap_pyfunction!(implied_volatility_py, m)?)?;
     Ok(())
 }
 
