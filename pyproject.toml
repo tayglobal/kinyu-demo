@@ -1,3 +1,10 @@
 [build-system]
 requires = ["setuptools>=42", "setuptools-rust"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "kinyu"
+version = "0.1.0"
+dependencies = [
+    "frozendict"
+]

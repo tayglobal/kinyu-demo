@@ -13,6 +13,7 @@ thread_local!(
 #[derive(Clone, Debug)]
 struct GNodeKey {
     func_name: String,
+    instance_id: Option<u64>,
     args: Py<PyTuple>,
     kwargs: PyObject, // Expecting frozendict
 }
@@ -20,6 +21,7 @@ struct GNodeKey {
 impl Hash for GNodeKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.func_name.hash(state);
+        self.instance_id.hash(state);
         Python::with_gil(|py| {
             let args_hash = self.args.bind(py).hash().unwrap_or(-1);
             let kwargs_hash = self.kwargs.bind(py).hash().unwrap_or(-1);
@@ -32,6 +34,7 @@ impl Hash for GNodeKey {
 impl PartialEq for GNodeKey {
     fn eq(&self, other: &Self) -> bool {
         self.func_name == other.func_name &&
+        self.instance_id == other.instance_id &&
         Python::with_gil(|py| {
             let self_args = self.args.bind(py);
             let other_args = other.args.bind(py);
@@ -98,11 +101,13 @@ impl Graph {
         Graph { state: Mutex::new(GraphState::new()) }
     }
 
+    #[pyo3(signature = (func, func_name, instance_id, *args, **kwargs))]
     fn execute(
         &self,
         py: Python,
         func: PyObject,
         func_name: String,
+        instance_id: Option<u64>,
         args: &Bound<PyTuple>,
         kwargs: Option<&Bound<PyDict>>,
     ) -> PyResult<PyObject> {
@@ -116,6 +121,7 @@ impl Graph {
 
         let key = GNodeKey {
             func_name,
+            instance_id,
             args: args.into_py(py),
             kwargs: frozen_kwargs,
         };
@@ -163,10 +169,12 @@ impl Graph {
         Ok(value)
     }
 
+    #[pyo3(signature = (func_name, instance_id, value, *args, **kwargs))]
     fn override_value(
         &self,
         py: Python,
         func_name: String,
+        instance_id: Option<u64>,
         value: PyObject,
         args: &Bound<PyTuple>,
         kwargs: Option<&Bound<PyDict>>,
@@ -181,6 +189,7 @@ impl Graph {
 
         let key = GNodeKey {
             func_name,
+            instance_id,
             args: args.into_py(py),
             kwargs: frozen_kwargs,
         };
@@ -208,20 +217,24 @@ impl Graph {
         let state = self.state.lock().unwrap();
         let mut edges = Vec::new();
 
+        let node_to_string = |key: &GNodeKey| -> PyResult<String> {
+            let func_name = if let Some(id) = key.instance_id {
+                format!("{}[{:#x}]", key.func_name, id)
+            } else {
+                key.func_name.clone()
+            };
+            Ok(format!(
+                "{}(*{}, **{})",
+                func_name,
+                key.args.bind(py).repr()?,
+                key.kwargs.bind(py).repr()?
+            ))
+        };
+
         for (parent_key, parent_node) in &state.nodes {
             for child_key in &parent_node.children {
-                let parent_repr = format!(
-                    "{}(*{}, **{})",
-                    parent_key.func_name,
-                    parent_key.args.bind(py).repr()?,
-                    parent_key.kwargs.bind(py).repr()?
-                );
-                let child_repr = format!(
-                    "{}(*{}, **{})",
-                    child_key.func_name,
-                    child_key.args.bind(py).repr()?,
-                    child_key.kwargs.bind(py).repr()?
-                );
+                let parent_repr = node_to_string(parent_key)?;
+                let child_repr = node_to_string(child_key)?;
                 edges.push((parent_repr, child_repr));
             }
         }
