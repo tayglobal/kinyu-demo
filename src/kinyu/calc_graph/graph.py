@@ -32,6 +32,7 @@ class CalcContextState:
 
 _NO_VALUE = object()
 _context_stack = []
+_layers_by_name = {}
 
 
 def _get_current_context():
@@ -52,6 +53,43 @@ class calc_context:
     def __exit__(self, exc_type, exc, tb):
         _context_stack.pop()
         self._state = None
+
+
+class _CalcLayer:
+    """Persistent context manager whose state can be reused across entries."""
+
+    def __init__(self, name=None):
+        self.name = name
+        self._state = CalcContextState()
+
+    @property
+    def state(self):
+        return self._state
+
+    def __enter__(self):
+        _context_stack.append(self._state)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if not _context_stack or _context_stack[-1] is not self._state:
+            raise RuntimeError("calc_layer context stack out of sync.")
+        _context_stack.pop()
+
+
+def calc_layer(name=None):
+    """Creates or retrieves a persistent calculation layer."""
+
+    if name is not None:
+        layer = _layers_by_name.get(name)
+        if layer is not None:
+            return layer
+
+    layer = _CalcLayer(name=name)
+
+    if name is not None:
+        _layers_by_name[name] = layer
+
+    return layer
 
 class Graph:
     _instance = None

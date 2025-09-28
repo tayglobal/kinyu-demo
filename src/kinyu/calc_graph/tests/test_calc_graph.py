@@ -1,11 +1,12 @@
 import unittest
-from kinyu.calc_graph import calc_node, calc_context
-from kinyu.calc_graph.graph import graph
+from kinyu.calc_graph import calc_node, calc_context, calc_layer
+from kinyu.calc_graph.graph import graph, _layers_by_name
 
 class TestStaticCalcGraph(unittest.TestCase):
 
     def setUp(self):
         graph.clear()
+        _layers_by_name.clear()
 
     def test_standalone_function_caching(self):
         """Tests that a simple decorated function caches its result."""
@@ -164,6 +165,89 @@ class TestStaticCalcGraph(unittest.TestCase):
         c.invalidate()
         self.assertEqual(c(), 11)
         self.assertEqual(call_counts['c'], 1)
+
+    def test_calc_layer_persistent_override(self):
+        @calc_node
+        def foo():
+            return 1
+
+        foo.set_value(3)
+
+        layer = calc_layer()
+
+        with layer:
+            foo.override(5)
+            self.assertEqual(foo(), 5)
+
+        self.assertEqual(foo(), 3)
+
+        with layer:
+            self.assertEqual(foo(), 5)
+
+        self.assertEqual(foo(), 3)
+
+    def test_calc_layer_multiple_layers(self):
+        @calc_node
+        def foo():
+            return 1
+
+        foo.set_value(3)
+
+        layer_one = calc_layer()
+        layer_two = calc_layer()
+
+        with layer_one:
+            foo.override(10)
+            self.assertEqual(foo(), 10)
+
+        with layer_two:
+            foo.override(20)
+            self.assertEqual(foo(), 20)
+
+        self.assertEqual(foo(), 3)
+
+        with layer_one:
+            self.assertEqual(foo(), 10)
+
+        self.assertEqual(foo(), 3)
+
+        with layer_two:
+            self.assertEqual(foo(), 20)
+
+        self.assertEqual(foo(), 3)
+
+    def test_calc_layer_named_reuse(self):
+        call_counts = {'bar': 0}
+
+        @calc_node
+        def bar():
+            call_counts['bar'] += 1
+            return 10
+
+        named_layer = calc_layer(name="shared")
+
+        with named_layer:
+            bar.override(20)
+            self.assertEqual(bar(), 20)
+            self.assertEqual(call_counts['bar'], 0)
+
+        self.assertEqual(bar(), 10)
+        self.assertEqual(call_counts['bar'], 1)
+
+        same_layer = calc_layer(name="shared")
+        self.assertIs(named_layer, same_layer)
+
+        with same_layer:
+            self.assertEqual(bar(), 20)
+            self.assertEqual(call_counts['bar'], 1)
+
+        with calc_layer(name="shared") as layer_context:
+            self.assertIs(layer_context, named_layer)
+            self.assertEqual(bar(), 20)
+
+        bar.invalidate()
+        self.assertEqual(bar(), 10)
+        self.assertEqual(call_counts['bar'], 2)
 
     def test_instance_method_caching_and_uniqueness(self):
         """Tests that nodes are unique per instance."""
