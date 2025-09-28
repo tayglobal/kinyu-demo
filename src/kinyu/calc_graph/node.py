@@ -10,6 +10,7 @@ class Node:
         self.id = self._get_id()
         self._result = None
         self._is_dirty = True
+        self._manual_override = False
         # Nodes this node depends on (dependencies) stored with metadata
         self.children = {}  # child_node -> {relation_type, conditional, active, dynamic}
         self.parents = set()   # Nodes that depend on this node (dependents)
@@ -74,16 +75,22 @@ class Node:
         if not self._is_dirty:
             self._is_dirty = True
             self._result = None
+            self._manual_override = False
             for parent in self.parents:
                 parent.invalidate()
 
-    def set_value(self, value):
+    def set_value(self, value, manual=False):
         """Sets the node's result, marks it as clean, and invalidates parents."""
         self._result = value
         self._is_dirty = False
+        self._manual_override = manual
         # Invalidate parents because their dependency has changed.
         for parent in self.parents:
             parent.invalidate()
+
+    @property
+    def has_manual_override(self):
+        return self._manual_override
 
     @property
     def is_dirty(self):
