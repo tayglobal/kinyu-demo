@@ -211,7 +211,7 @@ fn py_make_positive_definite(py: Python, matrix_list: &PyList, min_eigenvalue: f
 }
 
 #[pymodule]
-fn _corr(_py: Python, m: &PyModule) -> PyResult<()> {
+fn corr(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calculate_correlation_matrix, m)?)?;
     m.add_function(wrap_pyfunction!(py_make_positive_definite, m)?)?;
     Ok(())
