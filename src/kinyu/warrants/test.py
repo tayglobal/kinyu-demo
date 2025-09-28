@@ -10,7 +10,6 @@ sigma = 0.2
 n_paths = 10000
 n_steps = 252
 poly_degree = 2 # Reduced from 4 for stability
-seed = 42
 
 # Credit-related parameters
 credit_spreads_low = [[t, 0.01] for t in range(1, 6)]  # Low credit spread
@@ -25,7 +24,7 @@ try:
     price_low_risk = warrants.price_exotic_warrant(
         s0, strike_discount, buyback_price, t, forward_curve, sigma,
         credit_spreads_low, equity_credit_corr, recovery_rate,
-        n_paths, n_steps, poly_degree, seed
+        n_paths, n_steps, poly_degree
     )
     print(f"\n[Test 1] Price with LOW credit risk: {price_low_risk:.6f}")
     assert price_low_risk > 0, "Price with low risk should be positive"
@@ -34,7 +33,7 @@ try:
     price_high_risk = warrants.price_exotic_warrant(
         s0, strike_discount, buyback_price, t, forward_curve, sigma,
         credit_spreads_high, equity_credit_corr, recovery_rate,
-        n_paths, n_steps, poly_degree, seed
+        n_paths, n_steps, poly_degree
     )
     print(f"[Test 2] Price with HIGH credit risk: {price_high_risk:.6f}")
     assert price_high_risk < price_low_risk, "High credit risk should lower the price"
@@ -43,7 +42,7 @@ try:
     price_zero_corr = warrants.price_exotic_warrant(
         s0, strike_discount, buyback_price, t, forward_curve, sigma,
         credit_spreads_low, 0.0, recovery_rate, # Zero correlation
-        n_paths, n_steps, poly_degree, seed
+        n_paths, n_steps, poly_degree
     )
     print(f"[Test 3] Price with ZERO correlation: {price_zero_corr:.6f}")
     assert abs(price_zero_corr - price_low_risk) > 1e-3, "Correlation should impact the price"
@@ -52,7 +51,7 @@ try:
     price_high_buyback = warrants.price_exotic_warrant(
         s0, strike_discount, 1000.0, t, forward_curve, sigma, # High buyback
         credit_spreads_low, equity_credit_corr, recovery_rate,
-        n_paths, n_steps, poly_degree, seed
+        n_paths, n_steps, poly_degree
     )
     print(f"[Test 4] Price with HIGH buyback price: {price_high_buyback:.6f}")
     assert price_high_buyback > price_low_risk, "Higher buyback price should increase the warrant value"

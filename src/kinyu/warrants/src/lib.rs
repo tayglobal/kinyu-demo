@@ -3,7 +3,13 @@ use rand::distributions::Distribution;
 use statrs::distribution::{Normal, ContinuousCDF};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::Rng;
+
+#[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
+
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
 
 // Helper function to interpolate the credit curve linearly
 fn interpolate(curve: &Vec<[f64; 2]>, time: f64) -> f64 {
@@ -41,12 +47,11 @@ fn simulate_correlated_paths(
     t: f64,
     n_steps: usize,
     n_paths: usize,
-    seed: u64,
     credit_spreads: &Vec<[f64; 2]>,
     equity_credit_corr: f64,
 ) -> (DMatrix<f64>, DVector<f64>) {
     let dt = t / n_steps as f64;
-    let mut rng = StdRng::seed_from_u64(seed);
+    let mut rng = StdRng::from_entropy();
     let normal = Normal::new(0.0, 1.0).unwrap();
 
     let corr_matrix = Matrix2::new(1.0, equity_credit_corr, equity_credit_corr, 1.0);
@@ -104,8 +109,8 @@ fn poly_regression(x: &DVector<f64>, y: &DVector<f64>, degree: usize) -> Option<
     }
 }
 
-#[pyfunction]
-fn price_exotic_warrant(
+// Core pricing function (no Python/WebAssembly specific types)
+fn price_exotic_warrant_core(
     s0: f64,
     strike_discount: f64,
     buyback_price: f64,
@@ -118,11 +123,10 @@ fn price_exotic_warrant(
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
-    seed: u64,
-) -> PyResult<f64> {
+) -> f64 {
     let dt = t / n_steps as f64;
     let (stock_paths, default_times) = simulate_correlated_paths(
-        s0, &forward_curve, sigma, t, n_steps, n_paths, seed, &credit_spreads, equity_credit_corr
+        s0, &forward_curve, sigma, t, n_steps, n_paths, &credit_spreads, equity_credit_corr
     );
 
     let mut strikes = DMatrix::from_element(n_steps + 1, n_paths, 0.0);
@@ -209,13 +213,73 @@ fn price_exotic_warrant(
     }
 
     let price = warrant_values.mean();
-    Ok(price)
+    price
 }
 
+// Python wrapper function
+#[cfg(feature = "pyo3")]
+#[pyfunction]
+fn price_exotic_warrant(
+    s0: f64,
+    strike_discount: f64,
+    buyback_price: f64,
+    t: f64,
+    forward_curve: Vec<[f64; 2]>,
+    sigma: f64,
+    credit_spreads: Vec<[f64; 2]>,
+    equity_credit_corr: f64,
+    recovery_rate: f64,
+    n_paths: usize,
+    n_steps: usize,
+    poly_degree: usize,
+) -> PyResult<f64> {
+    Ok(price_exotic_warrant_core(
+        s0, strike_discount, buyback_price, t, forward_curve, sigma,
+        credit_spreads, equity_credit_corr, recovery_rate,
+        n_paths, n_steps, poly_degree
+    ))
+}
+
+#[cfg(feature = "pyo3")]
 #[pymodule]
 fn warrants(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(price_exotic_warrant, m)?)?;
     Ok(())
+}
+
+// WebAssembly wrapper function
+#[cfg(feature = "wasm")]
+#[wasm_bindgen]
+pub fn price_exotic_warrant_wasm(
+    s0: f64,
+    strike_discount: f64,
+    buyback_price: f64,
+    t: f64,
+    forward_curve: &[f64], // Flattened array: [t1, r1, t2, r2, ...]
+    sigma: f64,
+    credit_spreads: &[f64], // Flattened array: [t1, s1, t2, s2, ...]
+    equity_credit_corr: f64,
+    recovery_rate: f64,
+    n_paths: usize,
+    n_steps: usize,
+    poly_degree: usize,
+) -> f64 {
+    // Convert flattened arrays to Vec<[f64; 2]>
+    let forward_curve_vec: Vec<[f64; 2]> = forward_curve
+        .chunks(2)
+        .map(|chunk| [chunk[0], chunk[1]])
+        .collect();
+    
+    let credit_spreads_vec: Vec<[f64; 2]> = credit_spreads
+        .chunks(2)
+        .map(|chunk| [chunk[0], chunk[1]])
+        .collect();
+    
+    price_exotic_warrant_core(
+        s0, strike_discount, buyback_price, t, forward_curve_vec, sigma,
+        credit_spreads_vec, equity_credit_corr, recovery_rate,
+        n_paths, n_steps, poly_degree
+    )
 }
 
 
@@ -251,9 +315,9 @@ mod tests {
         // Test with zero credit spread, should be close to previous results
         let credit_spreads = vec![[1.0, 0.0]];
         let forward_curve = vec![[0.0, 0.05], [1.0, 0.05]];
-        let price = price_exotic_warrant(
-            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, credit_spreads, 0.0, 0.4, 5000, 200, 2, 42
-        ).unwrap();
+        let price = price_exotic_warrant_core(
+            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, credit_spreads, 0.0, 0.4, 5000, 200, 2
+        );
         assert!(price > 5.0 && price < 15.0); // A reasonable range
     }
 
@@ -262,14 +326,14 @@ mod tests {
         // High spread should lower the price
         let credit_spreads_low = vec![[1.0, 0.001]];
         let forward_curve = vec![[0.0, 0.05], [1.0, 0.05]];
-        let price_low_risk = price_exotic_warrant(
-            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, credit_spreads_low, 0.0, 0.4, 5000, 200, 2, 42
-        ).unwrap();
+        let price_low_risk = price_exotic_warrant_core(
+            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, credit_spreads_low, 0.0, 0.4, 5000, 200, 2
+        );
 
         let credit_spreads_high = vec![[1.0, 0.20]]; // 20% spread
-        let price_high_risk = price_exotic_warrant(
-            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, credit_spreads_high, 0.0, 0.4, 5000, 200, 2, 42
-        ).unwrap();
+        let price_high_risk = price_exotic_warrant_core(
+            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, credit_spreads_high, 0.0, 0.4, 5000, 200, 2
+        );
 
         assert!(price_high_risk < price_low_risk);
     }

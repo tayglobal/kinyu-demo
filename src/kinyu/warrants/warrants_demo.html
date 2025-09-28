@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exotic Warrant Pricing Demo</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+        
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        label {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #2c3e50;
+        }
+        
+        input[type="number"], input[type="text"] {
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="number"]:focus, input[type="text"]:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
+        .button-group {
+            text-align: center;
+            margin: 30px 0;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin: 0 10px;
+        }
+        
+        button:hover {
+            background: linear-gradient(135deg, #2980b9, #1f4e79);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        .result {
+            background: #ecf0f1;
+            border-left: 4px solid #3498db;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        
+        .result h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        
+        .price-display {
+            font-size: 24px;
+            font-weight: bold;
+            color: #27ae60;
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #7f8c8d;
+            font-style: italic;
+        }
+        
+        .error {
+            background: #e74c3c;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        
+        .info-box {
+            background: #d5dbdb;
+            border-left: 4px solid #7f8c8d;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        
+        .preset-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        
+        .preset-btn {
+            background: #95a5a6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .preset-btn:hover {
+            background: #7f8c8d;
+        }
+        
+        .curve-input {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 10px;
+            align-items: end;
+            margin-bottom: 10px;
+        }
+        
+        .curve-input input {
+            margin-bottom: 0;
+        }
+        
+        .remove-curve {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .add-curve {
+            background: #27ae60;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Exotic Warrant Pricing Demo</h1>
+        
+        <div class="info-box">
+            <strong>About this demo:</strong> This tool prices exotic warrants with weekly strike resets, 
+            issuer buyback options, and correlated equity/credit risk using Monte Carlo simulation 
+            with Longstaff-Schwartz least squares regression.
+        </div>
+
+        <div class="preset-buttons">
+            <button class="preset-btn" onclick="loadPreset('lowRisk')">Low Risk</button>
+            <button class="preset-btn" onclick="loadPreset('highRisk')">High Risk</button>
+            <button class="preset-btn" onclick="loadPreset('zeroCorr')">Zero Correlation</button>
+            <button class="preset-btn" onclick="loadPreset('highBuyback')">High Buyback</button>
+        </div>
+
+        <form id="warrantForm">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="s0">Initial Stock Price (S₀)</label>
+                    <input type="number" id="s0" value="100" step="0.01" min="0.01">
+                </div>
+                
+                <div class="form-group">
+                    <label for="strike_discount">Strike Discount Factor</label>
+                    <input type="number" id="strike_discount" value="0.9" step="0.01" min="0.01" max="1">
+                </div>
+                
+                <div class="form-group">
+                    <label for="buyback_price">Buyback Price</label>
+                    <input type="number" id="buyback_price" value="15" step="0.01" min="0">
+                </div>
+                
+                <div class="form-group">
+                    <label for="t">Time to Maturity (years)</label>
+                    <input type="number" id="t" value="1" step="0.1" min="0.1">
+                </div>
+                
+                <div class="form-group">
+                    <label for="sigma">Volatility (σ)</label>
+                    <input type="number" id="sigma" value="0.2" step="0.01" min="0.01" max="2">
+                </div>
+                
+                <div class="form-group">
+                    <label for="equity_credit_corr">Equity-Credit Correlation</label>
+                    <input type="number" id="equity_credit_corr" value="-0.5" step="0.1" min="-1" max="1">
+                </div>
+                
+                <div class="form-group">
+                    <label for="recovery_rate">Recovery Rate</label>
+                    <input type="number" id="recovery_rate" value="0.4" step="0.01" min="0" max="1">
+                </div>
+                
+                <div class="form-group">
+                    <label for="n_paths">Number of Monte Carlo Paths</label>
+                    <input type="number" id="n_paths" value="5000" step="1000" min="1000" max="50000">
+                </div>
+                
+                <div class="form-group">
+                    <label for="n_steps">Number of Time Steps</label>
+                    <input type="number" id="n_steps" value="252" step="1" min="50" max="1000">
+                </div>
+                
+                <div class="form-group">
+                    <label for="poly_degree">Polynomial Degree for Regression</label>
+                    <input type="number" id="poly_degree" value="2" step="1" min="1" max="5">
+                </div>
+                
+            </div>
+
+            <h2>Forward Rate Curve</h2>
+            <div id="forward_curve">
+                <div class="curve-input">
+                    <input type="number" placeholder="Time" value="0" step="0.1" min="0">
+                    <input type="number" placeholder="Rate" value="0.05" step="0.001" min="0">
+                    <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+                </div>
+                <div class="curve-input">
+                    <input type="number" placeholder="Time" value="1" step="0.1" min="0">
+                    <input type="number" placeholder="Rate" value="0.05" step="0.001" min="0">
+                    <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+                </div>
+            </div>
+            <button type="button" class="add-curve" onclick="addCurvePoint('forward_curve')">Add Point</button>
+
+            <h2>Credit Spread Curve</h2>
+            <div id="credit_spreads">
+                <div class="curve-input">
+                    <input type="number" placeholder="Time" value="0" step="0.1" min="0">
+                    <input type="number" placeholder="Spread" value="0.001" step="0.001" min="0">
+                    <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+                </div>
+                <div class="curve-input">
+                    <input type="number" placeholder="Time" value="1" step="0.1" min="0">
+                    <input type="number" placeholder="Spread" value="0.001" step="0.001" min="0">
+                    <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+                </div>
+                <div class="curve-input">
+                    <input type="number" placeholder="Time" value="2" step="0.1" min="0">
+                    <input type="number" placeholder="Spread" value="0.001" step="0.001" min="0">
+                    <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+                </div>
+                <div class="curve-input">
+                    <input type="number" placeholder="Time" value="3" step="0.1" min="0">
+                    <input type="number" placeholder="Spread" value="0.001" step="0.001" min="0">
+                    <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+                </div>
+                <div class="curve-input">
+                    <input type="number" placeholder="Time" value="4" step="0.1" min="0">
+                    <input type="number" placeholder="Spread" value="0.001" step="0.001" min="0">
+                    <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+                </div>
+                <div class="curve-input">
+                    <input type="number" placeholder="Time" value="5" step="0.1" min="0">
+                    <input type="number" placeholder="Spread" value="0.001" step="0.001" min="0">
+                    <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+                </div>
+            </div>
+            <button type="button" class="add-curve" onclick="addCurvePoint('credit_spreads')">Add Point</button>
+
+            <div class="button-group">
+                <button type="button" id="calculateBtn" onclick="calculatePrice()">Calculate Price</button>
+                <button type="button" onclick="resetForm()">Reset to Defaults</button>
+            </div>
+        </form>
+
+        <div id="result" class="result" style="display: none;">
+            <h3>Calculation Result</h3>
+            <div id="priceDisplay" class="price-display"></div>
+            <div id="calculationDetails"></div>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Calculating warrant price... This may take a few seconds.
+        </div>
+
+        <div id="error" class="error" style="display: none;">
+            <strong>Error:</strong> <span id="errorMessage"></span>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { price_exotic_warrant_wasm, test_wasm, simple_test_calculation, test_random_generation, debug_calculation, simple_option_test, minimal_test, test_random_seed_variation, test_price_variation_with_seeds, test_seed_functionality } from './pkg/warrants_wasm.js';
+        
+        let wasmInitialized = false;
+        
+        async function initializeWasm() {
+            if (!wasmInitialized) {
+                await init();
+                wasmInitialized = true;
+                
+                // Test WebAssembly module
+                const testResult = test_wasm();
+                console.log('WebAssembly test result:', testResult);
+                if (testResult !== 42.0) {
+                    console.error('WebAssembly test failed!');
+                } else {
+                    console.log('WebAssembly module is working correctly');
+                }
+                
+                // Test simple calculation
+                const simpleResult = simple_test_calculation();
+                console.log('Simple calculation result:', simpleResult);
+                
+                // Test random number generation
+                const randomTest = test_random_generation();
+                console.log('Random generation test (should be close to 0):', randomTest);
+                
+                // Test debug calculation
+                const debugTest = debug_calculation();
+                console.log('Debug calculation (interpolation + random):', debugTest);
+                
+                // Test simple option
+                const simpleOption = simple_option_test();
+                console.log('Simple option test (should be 10):', simpleOption);
+                
+                // Test minimal calculation
+                const minimalResult = minimal_test();
+                console.log('Minimal test result:', minimalResult);
+            }
+        }
+        
+        window.calculatePrice = async function() {
+            try {
+                await initializeWasm();
+                
+                // Hide previous results
+                document.getElementById('result').style.display = 'none';
+                document.getElementById('error').style.display = 'none';
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('calculateBtn').disabled = true;
+                
+                // Get form values
+                const s0 = parseFloat(document.getElementById('s0').value);
+                const strike_discount = parseFloat(document.getElementById('strike_discount').value);
+                const buyback_price = parseFloat(document.getElementById('buyback_price').value);
+                const t = parseFloat(document.getElementById('t').value);
+                const sigma = parseFloat(document.getElementById('sigma').value);
+                const equity_credit_corr = parseFloat(document.getElementById('equity_credit_corr').value);
+                const recovery_rate = parseFloat(document.getElementById('recovery_rate').value);
+                const n_paths = parseInt(document.getElementById('n_paths').value);
+                const n_steps = parseInt(document.getElementById('n_steps').value);
+                const poly_degree = parseInt(document.getElementById('poly_degree').value);
+                const seed = BigInt(Math.floor(Math.random() * 1000000)); // Generate random seed as BigInt
+                console.log('Generated random seed:', seed);
+                
+                // Test random seed variation (optional - can be removed)
+                const seedVariation = test_random_seed_variation();
+                console.log('Random seed variation test:', seedVariation);
+                
+                // Get curve data
+                const forward_curve = getCurveData('forward_curve');
+                const credit_spreads = getCurveData('credit_spreads');
+                
+                // Validate inputs
+                if (s0 <= 0 || strike_discount <= 0 || strike_discount > 1 || t <= 0 || 
+                    sigma <= 0 || recovery_rate < 0 || recovery_rate > 1 || 
+                    n_paths < 1000 || n_steps < 50 || poly_degree < 1 || 
+                    forward_curve.length < 2 || credit_spreads.length < 1) {
+                    throw new Error('Invalid input parameters. Please check your values.');
+                }
+                
+                // Flatten curve arrays for WebAssembly
+                const forward_curve_flat = forward_curve.flat();
+                const credit_spreads_flat = credit_spreads.flat();
+                
+                
+                // Call WebAssembly function
+                console.log('Calling WebAssembly function with parameters:');
+                console.log('s0:', s0, 'strike_discount:', strike_discount, 'buyback_price:', buyback_price);
+                console.log('t:', t, 'sigma:', sigma, 'equity_credit_corr:', equity_credit_corr);
+                console.log('recovery_rate:', recovery_rate, 'n_paths:', n_paths, 'n_steps:', n_steps);
+                console.log('poly_degree:', poly_degree, 'seed:', seed);
+                console.log('forward_curve_flat:', forward_curve_flat);
+                console.log('credit_spreads_flat:', credit_spreads_flat);
+                
+                const startTime = performance.now();
+                const price = price_exotic_warrant_wasm(
+                    s0, strike_discount, buyback_price, t,
+                    forward_curve_flat, sigma, credit_spreads_flat,
+                    equity_credit_corr, recovery_rate,
+                    n_paths, n_steps, poly_degree, seed
+                );
+                const endTime = performance.now();
+                
+                console.log('WebAssembly returned price:', price);
+                console.log('Calculation timestamp:', new Date().toISOString());
+                
+                // Display results
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('result').style.display = 'block';
+                document.getElementById('priceDisplay').textContent = `$${price.toFixed(6)}`;
+                
+                const details = `
+                    <p><strong>Calculation Time:</strong> ${(endTime - startTime).toFixed(2)} ms</p>
+                    <p><strong>Parameters Used:</strong></p>
+                    <ul>
+                        <li>Stock Price: $${s0}</li>
+                        <li>Strike Discount: ${(strike_discount * 100).toFixed(1)}%</li>
+                        <li>Buyback Price: $${buyback_price}</li>
+                        <li>Maturity: ${t} years</li>
+                        <li>Volatility: ${(sigma * 100).toFixed(1)}%</li>
+                        <li>Equity-Credit Correlation: ${equity_credit_corr}</li>
+                        <li>Recovery Rate: ${(recovery_rate * 100).toFixed(1)}%</li>
+                        <li>Monte Carlo Paths: ${n_paths.toLocaleString()}</li>
+                        <li>Time Steps: ${n_steps}</li>
+                        <li>Polynomial Degree: ${poly_degree}</li>
+                        <li>Random Seed: ${seed}</li>
+                    </ul>
+                `;
+                document.getElementById('calculationDetails').innerHTML = details;
+                
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('errorMessage').textContent = error.message;
+                console.error('Calculation error:', error);
+            } finally {
+                document.getElementById('calculateBtn').disabled = false;
+            }
+        };
+        
+        function getCurveData(curveId) {
+            const curveDiv = document.getElementById(curveId);
+            const inputs = curveDiv.querySelectorAll('.curve-input');
+            const data = [];
+            
+            inputs.forEach(input => {
+                const timeInput = input.querySelector('input[placeholder*="Time"]');
+                const valueInput = input.querySelector('input[placeholder*="Rate"], input[placeholder*="Spread"]');
+                
+                if (timeInput && valueInput) {
+                    const time = parseFloat(timeInput.value);
+                    const value = parseFloat(valueInput.value);
+                    if (!isNaN(time) && !isNaN(value)) {
+                        data.push([time, value]);
+                    }
+                }
+            });
+            
+            return data.sort((a, b) => a[0] - b[0]);
+        }
+        
+        window.addCurvePoint = function(curveId) {
+            const curveDiv = document.getElementById(curveId);
+            const newPoint = document.createElement('div');
+            newPoint.className = 'curve-input';
+            newPoint.innerHTML = `
+                <input type="number" placeholder="Time" value="0" step="0.1" min="0">
+                <input type="number" placeholder="${curveId === 'forward_curve' ? 'Rate' : 'Spread'}" value="0.01" step="0.001" min="0">
+                <button type="button" class="remove-curve" onclick="removeCurvePoint(this)">Remove</button>
+            `;
+            curveDiv.appendChild(newPoint);
+        };
+        
+        window.removeCurvePoint = function(button) {
+            const curveInput = button.parentElement;
+            const curveDiv = curveInput.parentElement;
+            if (curveDiv.querySelectorAll('.curve-input').length > 1) {
+                curveInput.remove();
+            } else {
+                alert('At least one point is required for each curve.');
+            }
+        };
+        
+        window.loadPreset = function(preset) {
+            const presets = {
+                lowRisk: {
+                    s0: 100, strike_discount: 0.9, buyback_price: 15, t: 1, sigma: 0.2,
+                    equity_credit_corr: -0.5, recovery_rate: 0.4, n_paths: 5000, n_steps: 252,
+                    poly_degree: 2,
+                    forward_curve: [[0, 0.05], [1, 0.05]],
+                    credit_spreads: [[0, 0.001], [1, 0.001], [2, 0.001], [3, 0.001], [4, 0.001], [5, 0.001]]
+                },
+                highRisk: {
+                    s0: 100, strike_discount: 0.9, buyback_price: 15, t: 1, sigma: 0.2,
+                    equity_credit_corr: -0.5, recovery_rate: 0.4, n_paths: 5000, n_steps: 252,
+                    poly_degree: 2,
+                    forward_curve: [[0, 0.05], [1, 0.05]],
+                    credit_spreads: [[0, 0.20], [1, 0.20], [2, 0.20], [3, 0.20], [4, 0.20], [5, 0.20]]
+                },
+                zeroCorr: {
+                    s0: 100, strike_discount: 0.9, buyback_price: 15, t: 1, sigma: 0.2,
+                    equity_credit_corr: 0.0, recovery_rate: 0.4, n_paths: 5000, n_steps: 252,
+                    poly_degree: 2,
+                    forward_curve: [[0, 0.05], [1, 0.05]],
+                    credit_spreads: [[0, 0.01], [1, 0.01], [2, 0.01], [3, 0.01], [4, 0.01], [5, 0.01]]
+                },
+                highBuyback: {
+                    s0: 100, strike_discount: 0.9, buyback_price: 1000, t: 1, sigma: 0.2,
+                    equity_credit_corr: -0.5, recovery_rate: 0.4, n_paths: 5000, n_steps: 252,
+                    poly_degree: 2,
+                    forward_curve: [[0, 0.05], [1, 0.05]],
+                    credit_spreads: [[0, 0.01], [1, 0.01], [2, 0.01], [3, 0.01], [4, 0.01], [5, 0.01]]
+                }
+            };
+            
+            const config = presets[preset];
+            if (config) {
+                // Set basic parameters
+                Object.keys(config).forEach(key => {
+                    if (key !== 'forward_curve' && key !== 'credit_spreads') {
+                        const element = document.getElementById(key);
+                        if (element) element.value = config[key];
+                    }
+                });
+                
+                // Set curves
+                setCurveData('forward_curve', config.forward_curve);
+                setCurveData('credit_spreads', config.credit_spreads);
+            }
+        };
+        
+        function setCurveData(curveId, data) {
+            const curveDiv = document.getElementById(curveId);
+            const inputs = curveDiv.querySelectorAll('.curve-input');
+            
+            // Remove existing points
+            inputs.forEach(input => input.remove());
+            
+            // Add new points
+            data.forEach(point => {
+                addCurvePoint(curveId);
+                const newInputs = curveDiv.querySelectorAll('.curve-input');
+                const lastInput = newInputs[newInputs.length - 1];
+                const timeInput = lastInput.querySelector('input[placeholder*="Time"]');
+                const valueInput = lastInput.querySelector('input[placeholder*="Rate"], input[placeholder*="Spread"]');
+                timeInput.value = point[0];
+                valueInput.value = point[1];
+            });
+        }
+        
+        window.resetForm = function() {
+            loadPreset('lowRisk');
+        };
+        
+        // Initialize with default values
+        window.addEventListener('load', function() {
+            loadPreset('lowRisk');
+        });
+    </script>
+</body>
+</html>

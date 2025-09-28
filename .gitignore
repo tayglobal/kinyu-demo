@@ -14,6 +14,11 @@ __pycache__/
 Cargo.lock
 target/
 
+# Ignore WebAssembly build artifacts
+pkg/
+wasm-build/
+*.wasm
+
 # Ignore virtual environment
 .venv/
 venv/

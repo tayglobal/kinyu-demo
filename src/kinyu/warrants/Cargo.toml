@@ -5,13 +5,18 @@ edition = "2021"
 
 [lib]
 name = "warrants"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 nalgebra = "0.32.3"
-rand = "0.8.5"
+rand = { version = "0.8.5", default-features = false, features = ["std", "std_rng"] }
 statrs = "0.17.0"
-pyo3 = { version = "0.20.0", default-features = false, features = ["macros"] }
+pyo3 = { version = "0.20.0", default-features = false, features = ["macros"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true }
+getrandom = { version = "0.2", features = ["js"] }
 
 [features]
 default = ["pyo3/extension-module"]
+wasm = ["wasm-bindgen", "js-sys", "web-sys"]
