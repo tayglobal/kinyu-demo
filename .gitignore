@@ -1,25 +1,6 @@
-# Python
+# Ignore generated images
+*.png
+
+# Ignore Python cache files
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-*.so
-build/
-dist/
-*.egg-info/
-wheels/
-.pytest_cache/
-.env
-
-# Rust
-/target/
-Cargo.lock
-
-# IDE / Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Other
-*.log
