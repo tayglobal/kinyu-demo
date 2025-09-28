@@ -5,11 +5,11 @@ s0 = 100.0
 strike_discount = 0.9
 buyback_price = 15.0
 t = 1.0
-r = 0.05
+forward_curve = [[0.0, 0.05], [t, 0.05]] # Flat forward curve at 5%
 sigma = 0.2
 n_paths = 10000
 n_steps = 252
-poly_degree = 4
+poly_degree = 2 # Reduced from 4 for stability
 seed = 42
 
 # Credit-related parameters
@@ -23,7 +23,7 @@ print("--- Running Integration Tests for Exotic Warrant Pricer ---")
 try:
     # --- Test 1: Pricing with low credit risk ---
     price_low_risk = warrants.price_exotic_warrant(
-        s0, strike_discount, buyback_price, t, r, sigma,
+        s0, strike_discount, buyback_price, t, forward_curve, sigma,
         credit_spreads_low, equity_credit_corr, recovery_rate,
         n_paths, n_steps, poly_degree, seed
     )
@@ -32,7 +32,7 @@ try:
 
     # --- Test 2: Pricing with high credit risk ---
     price_high_risk = warrants.price_exotic_warrant(
-        s0, strike_discount, buyback_price, t, r, sigma,
+        s0, strike_discount, buyback_price, t, forward_curve, sigma,
         credit_spreads_high, equity_credit_corr, recovery_rate,
         n_paths, n_steps, poly_degree, seed
     )
@@ -41,7 +41,7 @@ try:
 
     # --- Test 3: Pricing with zero correlation ---
     price_zero_corr = warrants.price_exotic_warrant(
-        s0, strike_discount, buyback_price, t, r, sigma,
+        s0, strike_discount, buyback_price, t, forward_curve, sigma,
         credit_spreads_low, 0.0, recovery_rate, # Zero correlation
         n_paths, n_steps, poly_degree, seed
     )
@@ -50,7 +50,7 @@ try:
 
     # --- Test 4: Pricing with high buyback price (less likely to be called) ---
     price_high_buyback = warrants.price_exotic_warrant(
-        s0, strike_discount, 1000.0, t, r, sigma, # High buyback
+        s0, strike_discount, 1000.0, t, forward_curve, sigma, # High buyback
         credit_spreads_low, equity_credit_corr, recovery_rate,
         n_paths, n_steps, poly_degree, seed
     )

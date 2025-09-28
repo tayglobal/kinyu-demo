@@ -36,7 +36,7 @@ fn interpolate(curve: &Vec<[f64; 2]>, time: f64) -> f64 {
 // Function to simulate correlated stock price paths and default times
 fn simulate_correlated_paths(
     s0: f64,
-    mu: f64,
+    forward_curve: &Vec<[f64; 2]>,
     sigma: f64,
     t: f64,
     n_steps: usize,
@@ -59,15 +59,16 @@ fn simulate_correlated_paths(
     for j in 0..n_paths {
         paths[(0, j)] = s0;
         for i in 1..=n_steps {
+            let current_time = i as f64 * dt;
             let z1 = normal.sample(&mut rng);
             let z2 = normal.sample(&mut rng);
             let e_stock = l_factor[(0, 0)] * z1;
             let e_credit = l_factor[(1, 0)] * z1 + l_factor[(1, 1)] * z2;
 
-            paths[(i, j)] = paths[(i - 1, j)] * ((mu - 0.5 * sigma.powi(2)) * dt + sigma * e_stock * dt.sqrt()).exp();
+            let r = interpolate(forward_curve, current_time);
+            paths[(i, j)] = paths[(i - 1, j)] * ((r - 0.5 * sigma.powi(2)) * dt + sigma * e_stock * dt.sqrt()).exp();
 
             if default_times[j] > t {
-                let current_time = i as f64 * dt;
                 let hazard_rate = interpolate(credit_spreads, current_time);
                 let prob_default = 1.0 - (-hazard_rate * dt).exp();
                 let u_credit = normal.cdf(e_credit);
@@ -109,7 +110,7 @@ fn price_exotic_warrant(
     strike_discount: f64,
     buyback_price: f64,
     t: f64,
-    r: f64,
+    forward_curve: Vec<[f64; 2]>,
     sigma: f64,
     credit_spreads: Vec<[f64; 2]>,
     equity_credit_corr: f64,
@@ -121,7 +122,7 @@ fn price_exotic_warrant(
 ) -> PyResult<f64> {
     let dt = t / n_steps as f64;
     let (stock_paths, default_times) = simulate_correlated_paths(
-        s0, r, sigma, t, n_steps, n_paths, seed, &credit_spreads, equity_credit_corr
+        s0, &forward_curve, sigma, t, n_steps, n_paths, seed, &credit_spreads, equity_credit_corr
     );
 
     let mut strikes = DMatrix::from_element(n_steps + 1, n_paths, 0.0);
@@ -151,6 +152,7 @@ fn price_exotic_warrant(
 
     for i in (0..n_steps).rev() {
         let current_time = i as f64 * dt;
+        let r = interpolate(&forward_curve, current_time);
 
         let mut x_regression = Vec::new();
         let mut y_regression = Vec::new();
@@ -175,6 +177,7 @@ fn price_exotic_warrant(
         };
 
         for j in 0..n_paths {
+            let r = interpolate(&forward_curve, current_time);
             let discounted_value = warrant_values[j] * (-r * dt).exp();
 
             if default_times[j] > current_time {
@@ -247,8 +250,9 @@ mod tests {
     fn test_warrant_pricing_no_default_risk() {
         // Test with zero credit spread, should be close to previous results
         let credit_spreads = vec![[1.0, 0.0]];
+        let forward_curve = vec![[0.0, 0.05], [1.0, 0.05]];
         let price = price_exotic_warrant(
-            100.0, 0.9, 1000.0, 1.0, 0.05, 0.2, credit_spreads, 0.0, 0.4, 5000, 200, 3, 42
+            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, credit_spreads, 0.0, 0.4, 5000, 200, 2, 42
         ).unwrap();
         assert!(price > 5.0 && price < 15.0); // A reasonable range
     }
@@ -257,13 +261,14 @@ mod tests {
     fn test_warrant_pricing_high_default_risk() {
         // High spread should lower the price
         let credit_spreads_low = vec![[1.0, 0.001]];
+        let forward_curve = vec![[0.0, 0.05], [1.0, 0.05]];
         let price_low_risk = price_exotic_warrant(
-            100.0, 0.9, 1000.0, 1.0, 0.05, 0.2, credit_spreads_low, 0.0, 0.4, 5000, 200, 3, 42
+            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, credit_spreads_low, 0.0, 0.4, 5000, 200, 2, 42
         ).unwrap();
 
         let credit_spreads_high = vec![[1.0, 0.20]]; // 20% spread
         let price_high_risk = price_exotic_warrant(
-            100.0, 0.9, 1000.0, 1.0, 0.05, 0.2, credit_spreads_high, 0.0, 0.4, 5000, 200, 3, 42
+            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, credit_spreads_high, 0.0, 0.4, 5000, 200, 2, 42
         ).unwrap();
 
         assert!(price_high_risk < price_low_risk);

@@ -14,7 +14,7 @@ The pricing function exposes the following key parameters:
 - `strike_discount`: fraction applied to the current spot when the strike is reset.
 - `buyback_price`: price at which the issuer can buy back the warrant (call feature).
 - `t`: time to maturity (in years).
-- `r`: risk-free drift used under the risk-neutral measure.
+- `forward_curve`: risk-neutral drift, specified as a term structure of `(time, rate)` pairs.
 - `sigma`: annualised equity volatility.
 - `credit_spreads`: term structure of hazard rates expressed as `(time, spread)` pairs.
 - `equity_credit_corr`: correlation between equity shocks and credit shocks.
@@ -48,10 +48,11 @@ lattice of `n_steps` with step size $\Delta t = T / n_{steps}$.【F:src/kinyu/wa
    of standard normal draws $Z_1, Z_2$. The resulting correlated shocks are
    $ε^S = L_{00} Z_1$ for equity and $ε^C = L_{10} Z_1 + L_{11} Z_2$ for credit.【F:src/kinyu/warrants/src/lib.rs†L52-L66】
 2. Simulate the stock price with a geometric Brownian motion under the
-   risk-neutral measure:
+   risk-neutral measure, using a time-dependent forward rate $r(t)$ interpolated
+   from the `forward_curve`:
 
    $$
-   S_{t+Δ t} = S_t \exp\left( (r - \tfrac{1}{2} σ^2)Δ t + σ ε^S \sqrt{Δ t} \right)
+   S_{t+Δ t} = S_t \exp\left( (r(t) - \tfrac{1}{2} σ^2)Δ t + σ ε^S \sqrt{Δ t} \right)
    $$
 
    This evolves each path column in the `paths` matrix.【F:src/kinyu/warrants/src/lib.rs†L59-L68】
@@ -100,11 +101,11 @@ The algorithm then rolls back from the penultimate time step to the origin.
 During each step:
 
 1. Gather in-the-money, surviving paths ($S_t > K_t$ and $\tau > t$). For
-   these paths, compute discounted future values $Y_j = V_{t+Δ t}^{(j)} e^{-r Δ t}$.
-   These serve as the dependent variable in a polynomial regression on the spot
-   price $X_j = S_t^{(j)}$.【F:src/kinyu/warrants/src/lib.rs†L152-L175】
+   these paths, compute discounted future values $Y_j = V_{t+Δ t}^{(j)} e^{-r(t) Δ t}$,
+   where $r(t)$ is the interpolated forward rate at the current time. These serve
+   as the dependent variable in a polynomial regression on the spot price $X_j = S_t^{(j)}$.【F:src/kinyu/warrants/src/lib.rs†L152-L175】
 2. Fit a least-squares polynomial of degree `poly_degree` to approximate the
-   conditional expectation $E[V_{t+Δ t} e^{-r Δ t} \,|\, S_t]$. This is solved by
+   conditional expectation $E[V_{t+Δ t} e^{-r(t) Δ t} \,|\, S_t]$. This is solved by
    building a Vandermonde matrix and applying the normal equations
    $(X^\top X) \beta = X^\top Y$.【F:src/kinyu/warrants/src/lib.rs†L84-L104】
 3. For each surviving path, discount the current continuation value and evaluate
@@ -191,9 +192,9 @@ Expected output:
 ```
 --- Running Integration Tests for Exotic Warrant Pricer ---
 
-[Test 1] Price with LOW credit risk: 9.894630
-[Test 2] Price with HIGH credit risk: 8.249698
-[Test 3] Price with ZERO correlation: 9.900788
+[Test 1] Price with LOW credit risk: 9.894603
+[Test 2] Price with HIGH credit risk: 8.250079
+[Test 3] Price with ZERO correlation: 9.900258
 [Test 4] Price with HIGH buyback price: 9.976867
 
 --- All integration tests passed successfully! ---
