@@ -9,6 +9,7 @@ setup(
     rust_extensions=[
         # RustExtension("kinyu_graph", "src/kinyu/graph/Cargo.toml", debug=False),
         RustExtension("kinyu_historical", "src/kinyu/vol/historical/Cargo.toml", debug=False),
+        # RustExtension("kinyu.corr._corr", "src/kinyu/corr/Cargo.toml", debug=False),
     ],
     # rust extensions are not zip safe, just like C-extensions.
     zip_safe=False,
