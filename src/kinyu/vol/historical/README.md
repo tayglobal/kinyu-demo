@@ -66,14 +66,14 @@ Here is the sample output from running the `demo.py` script:
 
 ```
 --- Historical Volatility Estimation Demo ---
-Using 5 periods of OHLC data.
+Using 250 periods of OHLC data.
 
 Results (Annualized):
 -------------------------
-Close-to-Close      : 0.3865
-Parkinson           : 0.1600
-Garman-Klass        : 0.0000
-Rogers-Satchell     : 0.1703
-Yang-Zhang          : 0.4018
+Close-to-Close      : 0.1932
+Parkinson           : 0.3012
+Garman-Klass        : 0.3338
+Rogers-Satchell     : 0.3402
+Yang-Zhang          : 0.3231
 -------------------------
 ```

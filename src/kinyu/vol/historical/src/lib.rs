@@ -73,11 +73,11 @@ impl HistoricalVolatility {
     pub fn rogers_satchell(&self) -> f64 {
         let n = self.prices.nrows() as f64;
         let sum = self.prices.row_iter().map(|row| {
-            let open = row[0];
-            let high = row[1];
-            let low = row[2];
-            let close = row[3];
-            (high / close).ln() * (high / open).ln() + (low / close).ln() * (low / open).ln()
+            let o = row[0];
+            let h = row[1];
+            let l = row[2];
+            let c = row[3];
+            (h / c).ln() * (h / o).ln() + (l / c).ln() * (l / o).ln()
         }).sum::<f64>();
 
         (sum / n).sqrt()
@@ -87,27 +87,31 @@ impl HistoricalVolatility {
     /// This estimator is a combination of overnight volatility and intraday volatility.
     pub fn yang_zhang(&self) -> f64 {
         let n_int = self.prices.nrows();
-        let n_float = n_int as f64;
+        let n = n_int as f64;
 
-        let overnight_vol_sq_sum = (0..n_int - 1).map(|i| {
+        // Overnight volatility (close-to-open)
+        let overnight_returns: Vec<f64> = (0..n_int - 1).map(|i| {
             let open_i1 = self.prices[(i + 1, 0)];
             let close_i = self.prices[(i, 3)];
             (open_i1 / close_i).ln()
-        }).map(|x| x.powi(2)).sum::<f64>();
-        let overnight_vol_sq = overnight_vol_sq_sum / (n_float - 1.0);
+        }).collect();
+        let overnight_mean = overnight_returns.iter().sum::<f64>() / (n - 1.0);
+        let overnight_var = overnight_returns.iter().map(|r| (r - overnight_mean).powi(2)).sum::<f64>() / (n - 2.0);
 
-        let open_close_vol_sq_sum = self.prices.row_iter().map(|row| {
+        // Open-to-close volatility
+        let open_close_returns: Vec<f64> = self.prices.row_iter().map(|row| {
             let open = row[0];
             let close = row[3];
-            (close/open).ln()
-        }).map(|x| x.powi(2)).sum::<f64>();
-        let open_close_vol_sq = open_close_vol_sq_sum / (n_float - 1.0);
+            (close / open).ln()
+        }).collect();
+        let open_close_mean = open_close_returns.iter().sum::<f64>() / n;
+        let open_close_var = open_close_returns.iter().map(|r| (r - open_close_mean).powi(2)).sum::<f64>() / (n - 1.0);
 
         let rogers_satchell_vol_sq = self.rogers_satchell().powi(2);
 
-        let k = 0.34 / (1.34 + (n_float + 1.0) / (n_float - 1.0));
+        let k = 0.34 / (1.34 + (n + 1.0) / (n - 1.0));
 
-        (overnight_vol_sq + k * open_close_vol_sq + (1.0-k)*rogers_satchell_vol_sq).sqrt()
+        (overnight_var + k * open_close_var + (1.0 - k) * rogers_satchell_vol_sq).sqrt()
     }
 }
 
@@ -121,11 +125,11 @@ struct PyHistoricalVolatility {
 impl PyHistoricalVolatility {
     #[new]
     fn new(prices: PyReadonlyArray2<f64>) -> Self {
-        let prices_array = prices.as_array();
-        let prices_mat = DMatrix::from_iterator(
-            prices_array.shape()[0],
-            prices_array.shape()[1],
-            prices_array.iter().cloned(),
+        let prices_slice = prices.as_slice().expect("Input array must be C-contiguous");
+        let prices_mat = DMatrix::from_row_slice(
+            prices.shape()[0],
+            prices.shape()[1],
+            prices_slice,
         );
         PyHistoricalVolatility {
             hv: HistoricalVolatility::new(prices_mat),
@@ -219,6 +223,6 @@ mod tests {
         let prices = get_sample_data();
         let hv = HistoricalVolatility::new(prices);
         let vol = hv.yang_zhang();
-        assert_relative_eq!(vol, 0.01485, epsilon = 1e-5);
+        assert_relative_eq!(vol, 0.01472, epsilon = 1e-5);
     }
 }
