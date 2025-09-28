@@ -11,4 +11,7 @@ crate-type = ["cdylib"]
 nalgebra = "0.32.3"
 rand = "0.8.5"
 statrs = "0.17.0"
-pyo3 = { version = "0.20.0", features = ["extension-module"] }
+pyo3 = { version = "0.20.0", default-features = false, features = ["macros"] }
+
+[features]
+default = ["pyo3/extension-module"]
