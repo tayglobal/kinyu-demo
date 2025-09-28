@@ -4,3 +4,16 @@
 # Ignore Python cache files
 __pycache__/
 *.pyc
+
+# Ignore Python package build artifacts
+*.egg-info/
+*.whl
+*.so
+
+# Ignore Rust build artifacts
+Cargo.lock
+target/
+
+# Ignore virtual environment
+.venv/
+venv/
