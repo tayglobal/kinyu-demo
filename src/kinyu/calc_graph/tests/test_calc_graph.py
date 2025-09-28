@@ -1,5 +1,5 @@
 import unittest
-from kinyu.calc_graph import calc_node
+from kinyu.calc_graph import calc_node, calc_context
 from kinyu.calc_graph.graph import graph
 
 class TestStaticCalcGraph(unittest.TestCase):
@@ -99,6 +99,71 @@ class TestStaticCalcGraph(unittest.TestCase):
 
         self.assertEqual(i(), 100)
         self.assertEqual(call_counts['i'], 2)
+
+    def test_calc_context_scoped_cache(self):
+        call_counts = {'a': 0}
+
+        @calc_node
+        def a():
+            call_counts['a'] += 1
+            return 21
+
+        with calc_context():
+            self.assertEqual(a(), 21)
+            self.assertEqual(a(), 21)
+
+        self.assertEqual(call_counts['a'], 1)
+
+        self.assertEqual(a(), 21)
+        self.assertEqual(call_counts['a'], 2)
+
+        self.assertEqual(a(), 21)
+        self.assertEqual(call_counts['a'], 2)
+
+    def test_calc_context_override(self):
+        call_counts = {'b': 0}
+
+        @calc_node
+        def b():
+            call_counts['b'] += 1
+            return 5
+
+        with calc_context():
+            b.override(42)
+            self.assertEqual(b(), 42)
+            self.assertEqual(call_counts['b'], 0)
+
+        self.assertEqual(call_counts['b'], 0)
+        self.assertEqual(b(), 5)
+        self.assertEqual(call_counts['b'], 1)
+
+        b.set_value(7)
+
+        with calc_context():
+            b.override(99)
+            self.assertEqual(b(), 99)
+
+        self.assertEqual(b(), 7)
+        self.assertEqual(call_counts['b'], 1)
+
+    def test_calc_context_set_value_sticky(self):
+        call_counts = {'c': 0}
+
+        @calc_node
+        def c():
+            call_counts['c'] += 1
+            return 11
+
+        with calc_context():
+            c.set_value(123)
+            self.assertEqual(c(), 123)
+
+        self.assertEqual(call_counts['c'], 0)
+        self.assertEqual(c(), 123)
+
+        c.invalidate()
+        self.assertEqual(c(), 11)
+        self.assertEqual(call_counts['c'], 1)
 
     def test_instance_method_caching_and_uniqueness(self):
         """Tests that nodes are unique per instance."""

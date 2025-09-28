@@ -4,6 +4,55 @@ import textwrap
 from functools import update_wrapper
 from .node import Node
 
+
+class CalcContextState:
+    """Tracks per-context caches and overrides."""
+
+    def __init__(self):
+        self.cache = {}
+        self.overrides = {}
+
+    def get_override(self, node):
+        return self.overrides.get(node, _NO_VALUE)
+
+    def get_cached(self, node):
+        if node in self.overrides:
+            return self.overrides[node]
+        return self.cache.get(node, _NO_VALUE)
+
+    def store_cached(self, node, value):
+        if node not in self.overrides:
+            self.cache[node] = value
+
+    def set_override(self, node, value):
+        self.overrides[node] = value
+        # Clear cached calculations so dependents recompute within the context.
+        self.cache.clear()
+
+
+_NO_VALUE = object()
+_context_stack = []
+
+
+def _get_current_context():
+    if not _context_stack:
+        return None
+    return _context_stack[-1]
+
+
+class calc_context:
+    """Context manager to scope calculation caches and overrides."""
+
+    def __enter__(self):
+        state = CalcContextState()
+        _context_stack.append(state)
+        self._state = state
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        _context_stack.pop()
+        self._state = None
+
 class Graph:
     _instance = None
     def __new__(cls):
@@ -292,31 +341,48 @@ class calc_node:
                 node.add_child(dep_node, relation_type=info['relation_type'], conditional=info['conditional'])
         return node
 
-    def execute(self, instance, *args, **kwargs):
-        node = self._get_node(instance)
-        execution_tracker.record_dependency(node)
-        if not node.is_dirty:
-            return node.result
-
+    def _execute_node(self, node, instance, args, kwargs):
         if not self.analysis_done:
             self._analyze_and_compile()
 
         execution_tracker.enter(node)
-        success = False
-        result = None
         try:
             if instance:
-                result = self.compiled_func(instance, *args, **kwargs)
-            else:
-                result = self.compiled_func(*args, **kwargs)
-            success = True
+                return self.compiled_func(instance, *args, **kwargs)
+            return self.compiled_func(*args, **kwargs)
         finally:
             context = execution_tracker.exit()
             node.update_children_activity(context['executed_children'])
 
-        if success:
-            node.set_value(result)
+    def execute(self, instance, *args, **kwargs):
+        node = self._get_node(instance)
+        execution_tracker.record_dependency(node)
+        context_state = _get_current_context()
+
+        if context_state:
+            override_value = context_state.get_override(node)
+            if override_value is not _NO_VALUE:
+                return override_value
+
+            cached_value = context_state.get_cached(node)
+            if cached_value is not _NO_VALUE:
+                return cached_value
+
+            if not node.is_dirty:
+                value = node.result
+                context_state.store_cached(node, value)
+                return value
+
+            result = self._execute_node(node, instance, args, kwargs)
+            context_state.store_cached(node, result)
             return result
+
+        if not node.is_dirty:
+            return node.result
+
+        result = self._execute_node(node, instance, args, kwargs)
+        node.set_value(result)
+        return result
 
     def __call__(self, *args, **kwargs):
         return self.execute(None, *args, **kwargs)
@@ -329,7 +395,16 @@ class calc_node:
     def set_value(self, value, instance=None):
         node = self._get_node(instance)
         if node:
-            node.set_value(value)
+            node.set_value(value, manual=True)
+
+    def override(self, value, instance=None):
+        context_state = _get_current_context()
+        if context_state is None:
+            raise RuntimeError("override() must be used within a calc_context.")
+
+        node = self._get_node(instance)
+        if node:
+            context_state.set_override(node, value)
 
     def describe_dependencies(self, instance=None):
         node = self._get_node(instance)
@@ -353,6 +428,9 @@ class calc_node:
 
             def set_value(self, value):
                 self.decorator.set_value(value, self.instance)
+
+            def override(self, value):
+                self.decorator.override(value, self.instance)
 
             def describe_dependencies(self):
                 return self.decorator.describe_dependencies(self.instance)
