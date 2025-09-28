@@ -31,6 +31,7 @@ For a comprehensive guide on how to use the library, please see the demonstratio
 [**SVI Calibration Demo.ipynb**](/notebooks/SVI_Calibration_Demo.ipynb)
 
 This notebook covers:
+
 - Generating realistic option data.
 - Calibrating the `SVIVolatilitySurface`.
 - Querying the surface for volatility values.
