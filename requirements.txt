@@ -11,3 +11,4 @@ watchdog
 sphinx
 frozendict
 setuptools-rust
+torch
