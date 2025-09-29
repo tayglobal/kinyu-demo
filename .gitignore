@@ -9,6 +9,7 @@ __pycache__/
 *.egg-info/
 *.whl
 *.so
+build/
 
 # Ignore Rust build artifacts
 Cargo.lock
@@ -21,4 +22,4 @@ src/**/*.wasm
 
 # Ignore virtual environment
 .venv/
-venv/
+venv
