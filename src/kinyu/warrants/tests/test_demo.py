@@ -90,7 +90,7 @@ def test_warrant_demo_calculation(live_server: str, page: Page):
 
         # With a fixed seed, the price should be deterministic.
         # This assertion makes the test much more reliable.
-        expected_price = "$9.965589"
+        expected_price = "$14.168205"
         assert price_text == expected_price, f"Expected price {expected_price}, but got {price_text}"
 
         price_value = float(price_text.strip().replace("$", ""))

@@ -3,43 +3,12 @@ use rand::distributions::Distribution;
 use statrs::distribution::{Normal, ContinuousCDF};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use std::collections::BinaryHeap;
-use std::cmp::Ordering;
 
 #[cfg(feature = "pyo3")]
 use pyo3::prelude::*;
 
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
-
-// Custom struct for priority queue entries to avoid sorting
-#[derive(Debug, Clone)]
-struct ExerciseCandidate {
-    path_idx: usize,
-    exercise_value: f64,
-    profitability: f64,
-}
-
-impl PartialEq for ExerciseCandidate {
-    fn eq(&self, other: &Self) -> bool {
-        self.profitability == other.profitability
-    }
-}
-
-impl Eq for ExerciseCandidate {}
-
-impl PartialOrd for ExerciseCandidate {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // Reverse order for max-heap (highest profitability first)
-        other.profitability.partial_cmp(&self.profitability)
-    }
-}
-
-impl Ord for ExerciseCandidate {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Equal)
-    }
-}
 
 // Helper function to interpolate the credit curve linearly
 fn interpolate(curve: &Vec<[f64; 2]>, time: f64) -> f64 {
@@ -155,7 +124,7 @@ fn poly_regression(x: &DVector<f64>, y: &DVector<f64>, degree: usize) -> Option<
 }
 
 // This is the core pricing function for the exotic warrant, using a Long-Schwartz Monte Carlo method.
-// It handles complex features like issuer credit risk, correlation, and monthly exercise limits.
+// It handles complex features like issuer credit risk and correlation.
 fn price_exotic_warrant_core(
     s0: f64,
     strike_discount: f64,
@@ -166,7 +135,6 @@ fn price_exotic_warrant_core(
     credit_spreads: Option<Vec<[f64; 2]>>,
     equity_credit_corr: f64,
     recovery_rate: f64,
-    monthly_exercise_limit: f64,
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
@@ -208,12 +176,7 @@ fn price_exotic_warrant_core(
         (final_price - final_strike).max(0.0)
     });
 
-    // Pre-allocate data structures for better performance
-    // Dynamically size the monthly counts vector based on maturity
-    let num_months = (t * 12.0).ceil() as usize + 1;
-    let mut monthly_exercise_counts = vec![0; num_months];
-    let mut exercised_paths = vec![false; n_paths]; // Use Vec<bool> instead of HashSet
-    let mut exercise_heap = BinaryHeap::with_capacity(n_paths / 4); // Pre-allocate heap
+    let mut exercised_paths = vec![false; n_paths];
 
     // Step 4: Perform the backward induction (Long-Schwartz algorithm).
     // We step back from maturity, deciding at each time step whether to exercise or hold.
@@ -222,8 +185,6 @@ fn price_exotic_warrant_core(
         let r = interpolate(&forward_curve, current_time);
 
         // Step 4a: Identify in-the-money paths to use for regression.
-        // We only regress on paths where immediate exercise has a positive value, as these
-        // are the only paths where the exercise decision is relevant.
         let mut x_regression = Vec::new();
         let mut y_regression = Vec::new();
 
@@ -233,13 +194,12 @@ fn price_exotic_warrant_core(
                 let strike = strikes[(i, j)];
                 if (stock_price - strike).max(0.0) > 0.0 {
                     x_regression.push(stock_price);
-                    // The 'y' values are the discounted future values from the next time step.
                     y_regression.push(warrant_values[j] * (-r * dt).exp());
                 }
             }
         }
 
-        // Step 4b: Run the regression to get the coefficients of the continuation value polynomial.
+        // Step 4b: Run the regression to get the continuation value polynomial.
         let beta = if !x_regression.is_empty() {
             let x_vec = DVector::from_vec(x_regression);
             let y_vec = DVector::from_vec(y_regression);
@@ -248,11 +208,9 @@ fn price_exotic_warrant_core(
             None
         };
 
-        // Step 4c: Identify all paths where immediate exercise is optimal using heap for efficiency.
-        // Clear the heap and exercised_paths for this time step
-        exercise_heap.clear();
         exercised_paths.fill(false);
 
+        // Step 4c: Decide whether to exercise for each path.
         for j in 0..n_paths {
             if default_times[j] > current_time {
                 let stock_price = stock_paths[(i, j)];
@@ -260,10 +218,8 @@ fn price_exotic_warrant_core(
                 let exercise_value = (stock_price - strike).max(0.0);
 
                 if exercise_value > 0.0 {
-                    let r = interpolate(&forward_curve, current_time);
                     let discounted_value = warrant_values[j] * (-r * dt).exp();
 
-                    // Estimate the continuation value for this specific path using the regression coefficients.
                     let continuation_value = if let Some(ref b) = beta {
                         let mut cv = 0.0;
                         for d in 0..=b.len() - 1 {
@@ -271,67 +227,27 @@ fn price_exotic_warrant_core(
                         }
                         cv
                     } else {
-                        // If regression fails (e.g., no in-the-money paths), assume hold is optimal.
                         discounted_value
                     };
 
                     let effective_exercise_value = exercise_value.min(buyback_price);
 
-                    // If exercising now is more valuable than holding, add it to the heap.
                     if effective_exercise_value > continuation_value {
-                        let profitability = effective_exercise_value - continuation_value;
-                        exercise_heap.push(ExerciseCandidate {
-                            path_idx: j,
-                            exercise_value: effective_exercise_value,
-                            profitability,
-                        });
+                        warrant_values[j] = effective_exercise_value;
+                        exercised_paths[j] = true;
                     }
                 }
             }
         }
 
-        // Step 4d: Enforce the monthly exercise limit using heap (O(log n) per extraction).
-        // Determine the limit for the current calendar month.
-        let current_month = (current_time * 12.0).floor() as usize;
-        let max_monthly_exercises = (n_paths as f64 * monthly_exercise_limit).floor() as usize;
-        
-        // Use direct array access instead of HashMap
-        let mut allowed_exercises = max_monthly_exercises.saturating_sub(monthly_exercise_counts[current_month]);
-
-        // Step 4e: Update warrant values based on the (limited) exercise decisions.
-        // Extract from heap in order of profitability (most profitable first).
-        let mut exercises_this_step = 0;
-        while let Some(candidate) = exercise_heap.pop() {
-            if allowed_exercises > 0 {
-                // This path exercises: its value for this time step is the exercise value.
-                warrant_values[candidate.path_idx] = candidate.exercise_value;
-                exercised_paths[candidate.path_idx] = true;
-                allowed_exercises -= 1;
-                exercises_this_step += 1;
-            } else {
-                // The monthly limit has been reached. No more exercises are allowed.
-                // Paths that were optimal to exercise but were blocked are now forced to "hold".
-                break;
-            }
-        }
-
-        // Update the total count of exercises for the month.
-        if exercises_this_step > 0 {
-            monthly_exercise_counts[current_month] += exercises_this_step;
-        }
-
-        // Step 4f: Update the values for all paths that did not exercise in this step.
+        // Step 4d: Update values for all paths.
         for j in 0..n_paths {
             if default_times[j] <= current_time {
-                // If the path defaulted previously, its value is the fixed recovery rate.
                 warrant_values[j] = recovery_rate;
             } else if !exercised_paths[j] {
-                // If the path did not exercise (either by choice or due to the limit),
-                // its value is the discounted value from the next time step (the continuation value).
                 let r = interpolate(&forward_curve, current_time);
                 warrant_values[j] *= (-r * dt).exp();
             }
-            // If the path was in exercised_paths, its value was already set and is not changed here.
         }
     }
 
@@ -353,7 +269,6 @@ fn price_exotic_warrant_core(
         credit_spreads,
         equity_credit_corr,
         recovery_rate,
-        monthly_exercise_limit,
         n_paths,
         n_steps,
         poly_degree,
@@ -370,7 +285,6 @@ fn price_exotic_warrant(
     credit_spreads: Option<Vec<[f64; 2]>>,
     equity_credit_corr: f64,
     recovery_rate: f64,
-    monthly_exercise_limit: f64,
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
@@ -379,7 +293,7 @@ fn price_exotic_warrant(
     Ok(price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, forward_curve, sigma,
         credit_spreads, equity_credit_corr, recovery_rate,
-        monthly_exercise_limit, n_paths, n_steps, poly_degree, seed
+        n_paths, n_steps, poly_degree, seed
     ))
 }
 
@@ -403,7 +317,6 @@ pub fn price_exotic_warrant_wasm(
     credit_spreads: &[f64], // Flattened array: [t1, s1, t2, s2, ...]. Pass empty slice for no credit risk.
     equity_credit_corr: f64,
     recovery_rate: f64,
-    monthly_exercise_limit: f64,
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
@@ -433,7 +346,7 @@ pub fn price_exotic_warrant_wasm(
     price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, forward_curve_vec, sigma,
         credit_spreads_opt, equity_credit_corr, recovery_rate,
-        monthly_exercise_limit, n_paths, n_steps, poly_degree, seed_opt
+        n_paths, n_steps, poly_degree, seed_opt
     )
 }
 
@@ -471,7 +384,7 @@ mod tests {
         let credit_spreads = vec![[1.0, 0.0]];
         let forward_curve = vec![[0.0, 0.05], [1.0, 0.05]];
         let price = price_exotic_warrant_core(
-            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, Some(credit_spreads), 0.0, 0.4, 1.0, 5000, 200, 2, Some(123)
+            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, Some(credit_spreads), 0.0, 0.4, 5000, 200, 2, Some(123)
         );
         assert!(price > 5.0 && price < 15.0); // A reasonable range
     }
@@ -482,39 +395,15 @@ mod tests {
         let credit_spreads_low = vec![[1.0, 0.001]];
         let forward_curve = vec![[0.0, 0.05], [1.0, 0.05]];
         let price_low_risk = price_exotic_warrant_core(
-            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, Some(credit_spreads_low), 0.0, 0.4, 1.0, 5000, 200, 2, Some(123)
+            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, Some(credit_spreads_low), 0.0, 0.4, 5000, 200, 2, Some(123)
         );
 
         let credit_spreads_high = vec![[1.0, 0.20]]; // 20% spread
         let price_high_risk = price_exotic_warrant_core(
-            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, Some(credit_spreads_high), 0.0, 0.4, 1.0, 5000, 200, 2, Some(123)
+            100.0, 0.9, 1000.0, 1.0, forward_curve, 0.2, Some(credit_spreads_high), 0.0, 0.4, 5000, 200, 2, Some(123)
         );
 
         assert!(price_high_risk < price_low_risk);
-    }
-
-    #[test]
-    fn test_warrant_pricing_with_exercise_limit() {
-        // A scenario where the warrant is likely to be exercised
-        let forward_curve = vec![[0.0, 0.05], [1.0, 0.05]];
-        let credit_spreads = vec![[1.0, 0.0]]; // No default risk
-        let s0 = 100.0;
-        let strike_discount = 0.9;
-        let t = 1.0;
-        let sigma = 0.3; // Higher vol to increase exercise probability
-
-        // Price with no exercise limit
-        let price_no_limit = price_exotic_warrant_core(
-            s0, strike_discount, 1000.0, t, forward_curve.clone(), sigma, Some(credit_spreads.clone()), 0.0, 0.4, 1.0, 5000, 200, 2, Some(123)
-        );
-
-        // Price with a strict exercise limit (e.g., 10% per month)
-        let price_with_limit = price_exotic_warrant_core(
-            s0, strike_discount, 1000.0, t, forward_curve.clone(), sigma, Some(credit_spreads.clone()), 0.0, 0.4, 0.1, 5000, 200, 2, Some(123)
-        );
-
-        // The constrained warrant should be less valuable
-        assert!(price_with_limit < price_no_limit);
     }
 
     #[test]
@@ -528,13 +417,13 @@ mod tests {
 
         // Price with no credit curve provided.
         let price_no_credit_risk = price_exotic_warrant_core(
-            s0, strike_discount, 1000.0, t, forward_curve.clone(), sigma, None, 0.0, 0.4, 1.0, 5000, 200, 2, Some(456)
+            s0, strike_discount, 1000.0, t, forward_curve.clone(), sigma, None, 0.0, 0.4, 5000, 200, 2, Some(456)
         );
 
         // Price with a zero credit spread (which should also model no default risk).
         let credit_spreads_zero = vec![[1.0, 0.0]];
         let price_zero_spread = price_exotic_warrant_core(
-            s0, strike_discount, 1000.0, t, forward_curve.clone(), sigma, Some(credit_spreads_zero), 0.0, 0.4, 1.0, 5000, 200, 2, Some(456)
+            s0, strike_discount, 1000.0, t, forward_curve.clone(), sigma, Some(credit_spreads_zero), 0.0, 0.4, 5000, 200, 2, Some(456)
         );
 
         // The prices should be exactly equal with the same seed.
@@ -544,29 +433,17 @@ mod tests {
     }
 
     #[test]
-    fn test_warrant_pricing_long_maturity() {
-        // This test verifies that the monthly exercise limit logic works for T > 1 year.
-        // It should run without panicking on an out-of-bounds index.
-        let forward_curve = vec![[0.0, 0.05], [2.0, 0.05]];
-        let price = price_exotic_warrant_core(
-            100.0, 0.9, 1000.0, 2.0, forward_curve, 0.2, None, 0.0, 0.4, 0.1, 1000, 200, 2, Some(789)
-        );
-        // Check that the price is positive, confirming the simulation ran.
-        assert!(price > 0.0);
-    }
-
-    #[test]
     fn test_warrant_pricing_with_seed() {
         // This test verifies that providing the same seed produces the exact same result.
         let forward_curve = vec![[0.0, 0.05], [1.0, 0.05]];
         let seed = Some(12345 as u64);
 
         let price1 = price_exotic_warrant_core(
-            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, None, 0.0, 0.4, 1.0, 2000, 100, 2, seed
+            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, None, 0.0, 0.4, 2000, 100, 2, seed
         );
 
         let price2 = price_exotic_warrant_core(
-            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, None, 0.0, 0.4, 1.0, 2000, 100, 2, seed
+            100.0, 0.9, 1000.0, 1.0, forward_curve.clone(), 0.2, None, 0.0, 0.4, 2000, 100, 2, seed
         );
 
         assert_eq!(price1, price2);
