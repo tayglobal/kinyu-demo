@@ -223,6 +223,7 @@ fn price_exotic_warrant_core(
     credit_spreads: &[(f64, f64)],
     equity_credit_corr: f64,
     recovery_rate: f64,
+    monthly_exercise_limit: f64,
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
@@ -335,6 +336,7 @@ pub fn price_exotic_warrant_wasm(
     credit_spreads: &[f64], // Flattened array: [t1, s1, t2, s2, ...]
     equity_credit_corr: f64,
     recovery_rate: f64,
+    monthly_exercise_limit: f64,
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
@@ -359,7 +361,7 @@ pub fn price_exotic_warrant_wasm(
     
     price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve_vec, sigma,
-        &credit_spreads_vec, equity_credit_corr, recovery_rate,
+        &credit_spreads_vec, equity_credit_corr, recovery_rate, monthly_exercise_limit,
         n_paths, n_steps, poly_degree, seed
     )
 }
@@ -382,13 +384,14 @@ pub fn simple_test_calculation() -> f64 {
     let credit_spreads = vec![(0.0, 0.01), (1.0, 0.01)]; // Start at time 0
     let equity_credit_corr = -0.5;
     let recovery_rate = 0.4;
+    let monthly_exercise_limit = 1.0;
     let n_paths = 1000; // Smaller for testing
     let n_steps = 100;  // Smaller for testing
     let poly_degree = 2;
     
     price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-        &credit_spreads, equity_credit_corr, recovery_rate,
+        &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
         n_paths, n_steps, poly_degree, None
     )
 }
@@ -450,13 +453,14 @@ pub fn minimal_test() -> f64 {
     let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)]; // Very low credit risk
     let equity_credit_corr = 0.0; // No correlation
     let recovery_rate = 0.4;
+    let monthly_exercise_limit = 1.0;
     let n_paths = 10; // Very small
     let n_steps = 2;  // Very small
     let poly_degree = 1; // Simple polynomial
     
     price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-        &credit_spreads, equity_credit_corr, recovery_rate,
+        &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
         n_paths, n_steps, poly_degree, None
     )
 }
@@ -498,6 +502,7 @@ pub fn test_price_variation_with_seeds() -> f64 {
     let credit_spreads = vec![(0.0, 0.01), (1.0, 0.01)];
     let equity_credit_corr = -0.5;
     let recovery_rate = 0.4;
+    let monthly_exercise_limit = 1.0;
     let n_paths = 1000;
     let n_steps = 100;
     let poly_degree = 2;
@@ -505,14 +510,14 @@ pub fn test_price_variation_with_seeds() -> f64 {
     // Calculate price with seed 12345
     let price1 = price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-        &credit_spreads, equity_credit_corr, recovery_rate,
+        &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
         n_paths, n_steps, poly_degree, Some(12345)
     );
     
     // Calculate price with seed 54321
     let price2 = price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-        &credit_spreads, equity_credit_corr, recovery_rate,
+        &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
         n_paths, n_steps, poly_degree, Some(54321)
     );
     
@@ -533,4 +538,343 @@ pub fn test_seed_functionality() -> f64 {
     
     // Return the difference - should be non-zero if seeds work
     (val1 - val2).abs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_interpolate_basic() {
+        let curve = vec![(0.0, 0.01), (1.0, 0.02), (2.0, 0.03)];
+        
+        // Test exact matches
+        assert!((interpolate(&curve, 0.0) - 0.01).abs() < 1e-9);
+        assert!((interpolate(&curve, 1.0) - 0.02).abs() < 1e-9);
+        assert!((interpolate(&curve, 2.0) - 0.03).abs() < 1e-9);
+        
+        // Test interpolation
+        assert!((interpolate(&curve, 0.5) - 0.015).abs() < 1e-9);
+        assert!((interpolate(&curve, 1.5) - 0.025).abs() < 1e-9);
+        
+        // Test extrapolation
+        assert!((interpolate(&curve, -1.0) - 0.01).abs() < 1e-9);
+        assert!((interpolate(&curve, 3.0) - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_interpolate_empty_curve() {
+        let curve = vec![];
+        assert!((interpolate(&curve, 0.5) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_interpolate_single_point() {
+        let curve = vec![(1.0, 0.05)];
+        assert!((interpolate(&curve, 0.0) - 0.05).abs() < 1e-9);
+        assert!((interpolate(&curve, 1.0) - 0.05).abs() < 1e-9);
+        assert!((interpolate(&curve, 2.0) - 0.05).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_simple_rng_seed() {
+        let mut rng1 = SimpleRng::new(12345);
+        let mut rng2 = SimpleRng::new(12345);
+        
+        // Same seed should produce same sequence
+        let val1_1 = rng1.next();
+        let val2_1 = rng2.next();
+        assert!((val1_1 - val2_1).abs() < 1e-9);
+        
+        let val1_2 = rng1.next();
+        let val2_2 = rng2.next();
+        assert!((val1_2 - val2_2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_simple_rng_different_seeds() {
+        let mut rng1 = SimpleRng::new(12345);
+        let mut rng2 = SimpleRng::new(54321);
+        
+        // Different seeds should produce different values
+        let val1 = rng1.next();
+        let val2 = rng2.next();
+        assert!((val1 - val2).abs() > 1e-9);
+    }
+
+    #[test]
+    fn test_simple_rng_range() {
+        let mut rng = SimpleRng::new(42);
+        
+        // Generate many values and check they're in [0, 1)
+        for _ in 0..1000 {
+            let val = rng.next();
+            assert!(val >= 0.0);
+            assert!(val < 1.0);
+        }
+    }
+
+    #[test]
+    fn test_simple_rng_normal_distribution() {
+        let mut rng = SimpleRng::new(42);
+        let mut sum = 0.0;
+        let n = 10000;
+        
+        // Generate many normal values and check mean is close to 0
+        for _ in 0..n {
+            sum += rng.normal();
+        }
+        
+        let mean = sum / n as f64;
+        assert!(mean.abs() < 0.1); // Should be close to 0
+    }
+
+    #[test]
+    fn test_erf_function() {
+        // Test some known values of the error function
+        assert!((erf(0.0) - 0.0).abs() < 1e-9);
+        assert!(erf(1.0) > 0.8);
+        assert!(erf(-1.0) < -0.8);
+        assert!(erf(2.0) > 0.99);
+        assert!(erf(-2.0) < -0.99);
+    }
+
+    #[test]
+    fn test_poly_regression_simple() {
+        // Test with a simple quadratic: y = 2 + 3x + 4x^2
+        let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let y = vec![9.0, 24.0, 47.0, 78.0, 117.0]; // 2 + 3*1 + 4*1^2 = 9, etc.
+        
+        let result = poly_regression(&x, &y, 2);
+        assert!(result.is_some());
+        
+        let beta = result.unwrap();
+        assert_eq!(beta.len(), 3);
+        
+        // Check coefficients are close to expected values
+        assert!((beta[0] - 2.0).abs() < 0.1);
+        assert!((beta[1] - 3.0).abs() < 0.1);
+        assert!((beta[2] - 4.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_poly_regression_empty() {
+        let x = vec![];
+        let y = vec![];
+        
+        let result = poly_regression(&x, &y, 2);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_poly_regression_linear() {
+        // Test with a simple linear: y = 1 + 2x
+        let x = vec![1.0, 2.0, 3.0];
+        let y = vec![3.0, 5.0, 7.0];
+        
+        let result = poly_regression(&x, &y, 1);
+        assert!(result.is_some());
+        
+        let beta = result.unwrap();
+        assert_eq!(beta.len(), 2);
+        assert!((beta[0] - 1.0).abs() < 0.1);
+        assert!((beta[1] - 2.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_price_exotic_warrant_core_basic() {
+        let s0 = 100.0;
+        let strike_discount = 0.9;
+        let buyback_price = 15.0;
+        let t = 0.1; // Short time for fast test
+        let forward_curve = vec![(0.0, 0.05), (0.1, 0.05)];
+        let sigma = 0.2;
+        let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)];
+        let equity_credit_corr = 0.0;
+        let recovery_rate = 0.4;
+        let monthly_exercise_limit = 1.0;
+        let n_paths = 100; // Small for fast test
+        let n_steps = 10;
+        let poly_degree = 1;
+        
+        let price = price_exotic_warrant_core(
+            s0, strike_discount, buyback_price, t, &forward_curve, sigma,
+            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            n_paths, n_steps, poly_degree, Some(42)
+        );
+        
+        // Basic sanity checks
+        assert!(price >= 0.0, "Price should be non-negative");
+        assert!(price < 100.0, "Price should be reasonable");
+    }
+
+    #[test]
+    fn test_price_exotic_warrant_core_invalid_inputs() {
+        let forward_curve = vec![(0.0, 0.05), (1.0, 0.05)];
+        let credit_spreads = vec![(0.0, 0.01), (1.0, 0.01)];
+        
+        // Test with invalid inputs - should return 0
+        let price1 = price_exotic_warrant_core(
+            0.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 100, 10, 2, None
+        );
+        assert_eq!(price1, 0.0);
+        
+        let price2 = price_exotic_warrant_core(
+            100.0, 0.0, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 100, 10, 2, None
+        );
+        assert_eq!(price2, 0.0);
+        
+        let price3 = price_exotic_warrant_core(
+            100.0, 0.9, 15.0, 0.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 100, 10, 2, None
+        );
+        assert_eq!(price3, 0.0);
+        
+        let price4 = price_exotic_warrant_core(
+            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.0, &credit_spreads, 0.0, 0.4, 1.0, 100, 10, 2, None
+        );
+        assert_eq!(price4, 0.0);
+        
+        let price5 = price_exotic_warrant_core(
+            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 0, 10, 2, None
+        );
+        assert_eq!(price5, 0.0);
+        
+        let price6 = price_exotic_warrant_core(
+            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 100, 0, 2, None
+        );
+        assert_eq!(price6, 0.0);
+    }
+
+    #[test]
+    fn test_price_exotic_warrant_core_deterministic() {
+        let s0 = 100.0;
+        let strike_discount = 0.9;
+        let buyback_price = 15.0;
+        let t = 0.1;
+        let forward_curve = vec![(0.0, 0.05), (0.1, 0.05)];
+        let sigma = 0.2;
+        let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)];
+        let equity_credit_corr = 0.0;
+        let recovery_rate = 0.4;
+        let monthly_exercise_limit = 1.0;
+        let n_paths = 100;
+        let n_steps = 10;
+        let poly_degree = 1;
+        let seed = Some(12345);
+        
+        // Run the same calculation twice with the same seed
+        let price1 = price_exotic_warrant_core(
+            s0, strike_discount, buyback_price, t, &forward_curve, sigma,
+            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            n_paths, n_steps, poly_degree, seed
+        );
+        
+        let price2 = price_exotic_warrant_core(
+            s0, strike_discount, buyback_price, t, &forward_curve, sigma,
+            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            n_paths, n_steps, poly_degree, seed
+        );
+        
+        // Should be identical with the same seed
+        assert!((price1 - price2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_wasm_bindgen_functions() {
+        // Test simple option calculation (doesn't use js-sys)
+        let option_price = simple_option_test();
+        assert_eq!(option_price, 10.0); // 100 - 90 = 10
+        
+        // Test seed functionality (doesn't use js-sys)
+        let seed_func_test = test_seed_functionality();
+        assert!(seed_func_test > 0.0); // Should be different with different seeds
+    }
+
+    #[test]
+    fn test_price_variation_with_seeds() {
+        // Test that different seeds produce different results by calling the function directly
+        let s0 = 100.0;
+        let strike_discount = 0.9;
+        let buyback_price = 15.0;
+        let t = 0.1;
+        let forward_curve = vec![(0.0, 0.05), (0.1, 0.05)];
+        let sigma = 0.2;
+        let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)];
+        let equity_credit_corr = 0.0;
+        let recovery_rate = 0.4;
+        let monthly_exercise_limit = 1.0;
+        let n_paths = 100;
+        let n_steps = 10;
+        let poly_degree = 1;
+        
+        let price1 = price_exotic_warrant_core(
+            s0, strike_discount, buyback_price, t, &forward_curve, sigma,
+            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            n_paths, n_steps, poly_degree, Some(12345)
+        );
+        
+        let price2 = price_exotic_warrant_core(
+            s0, strike_discount, buyback_price, t, &forward_curve, sigma,
+            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            n_paths, n_steps, poly_degree, Some(54321)
+        );
+        
+        let price_diff = (price1 - price2).abs();
+        assert!(price_diff > 0.0);
+    }
+
+    #[test]
+    fn test_minimal_calculation() {
+        // Test minimal calculation without calling WASM functions that use js-sys
+        let s0 = 100.0;
+        let strike_discount = 0.9;
+        let buyback_price = 15.0;
+        let t = 0.1;
+        let forward_curve = vec![(0.0, 0.05), (0.1, 0.05)];
+        let sigma = 0.2;
+        let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)];
+        let equity_credit_corr = 0.0;
+        let recovery_rate = 0.4;
+        let monthly_exercise_limit = 1.0;
+        let n_paths = 10;
+        let n_steps = 2;
+        let poly_degree = 1;
+        
+        let price = price_exotic_warrant_core(
+            s0, strike_discount, buyback_price, t, &forward_curve, sigma,
+            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            n_paths, n_steps, poly_degree, Some(42)
+        );
+        
+        assert!(price >= 0.0);
+        assert!(price.is_finite());
+    }
+
+    #[test]
+    fn test_simple_test_calculation() {
+        // Test simple calculation without calling WASM functions that use js-sys
+        let s0 = 100.0;
+        let strike_discount = 0.9;
+        let buyback_price = 15.0;
+        let t = 1.0;
+        let forward_curve = vec![(0.0, 0.05), (1.0, 0.05)];
+        let sigma = 0.2;
+        let credit_spreads = vec![(0.0, 0.01), (1.0, 0.01)];
+        let equity_credit_corr = -0.5;
+        let recovery_rate = 0.4;
+        let monthly_exercise_limit = 1.0;
+        let n_paths = 1000;
+        let n_steps = 100;
+        let poly_degree = 2;
+        
+        let price = price_exotic_warrant_core(
+            s0, strike_discount, buyback_price, t, &forward_curve, sigma,
+            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            n_paths, n_steps, poly_degree, Some(123)
+        );
+        
+        assert!(price >= 0.0);
+        assert!(price.is_finite());
+        assert!(price < 100.0); // Should be reasonable
+    }
 }

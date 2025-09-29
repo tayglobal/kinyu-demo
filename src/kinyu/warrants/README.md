@@ -19,12 +19,12 @@ The pricing function exposes the following key parameters:
 - `t`: time to maturity (in years).
 - `forward_curve`: risk-neutral drift, specified as a term structure of `(time, rate)` pairs.
 - `sigma`: annualised equity volatility.
-- `credit_spreads`: term structure of hazard rates expressed as `(time, spread)` pairs.
+- `credit_spreads`: (Optional) term structure of hazard rates expressed as `(time, spread)` pairs. If `None`, credit risk is not modelled.
 - `equity_credit_corr`: correlation between equity shocks and credit shocks.
 - `recovery_rate`: payoff if the issuer defaults before maturity.
+- `monthly_exercise_limit`: the maximum fraction of warrants that can be exercised in a calendar month (e.g., `0.1` for 10%). Pass `1.0` for no limit.
 - `n_paths`, `n_steps`: number of Monte Carlo paths and time steps.
 - `poly_degree`: degree of the polynomial basis for the regression.
-- `seed`: RNG seed for reproducibility.
 
 These parameters are passed to `price_exotic_warrant`, which orchestrates the
 simulation and backward induction steps described below.【F:src/kinyu/warrants/src/lib.rs†L106-L210】
@@ -190,6 +190,8 @@ The test suite includes:
 - **Test 2**: Pricing with high credit risk (should be lower than low risk)
 - **Test 3**: Pricing with zero correlation (should differ from correlated case)
 - **Test 4**: Pricing with high buyback price (should be higher than normal case)
+- **Test 5**: Pricing with a monthly exercise limit (should be lower than no limit)
+- **Test 6**: Pricing with no credit risk (should be similar to zero-spread risk)
 
 Expected output:
 ```
@@ -198,7 +200,10 @@ Expected output:
 [Test 1] Price with LOW credit risk: 9.894603
 [Test 2] Price with HIGH credit risk: 8.250079
 [Test 3] Price with ZERO correlation: 9.900258
-[Test 4] Price with HIGH buyback price: 9.976867
+[Test 4] Price with HIGH buyback price: 14.442360
+[Test 5] Price with 10% MONTHLY exercise limit: 12.082212
+[Test 6] Price with NO credit risk (None): 13.987848
+          (Price with ZERO credit spread: 13.944009)
 
 --- All integration tests passed successfully! ---
 ```
