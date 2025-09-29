@@ -3,7 +3,7 @@ use rand::distributions::Distribution;
 use statrs::distribution::{Normal, ContinuousCDF};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use std::collections::{HashMap, HashSet};
+use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 
 #[cfg(feature = "pyo3")]
@@ -11,6 +11,35 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
+
+// Custom struct for priority queue entries to avoid sorting
+#[derive(Debug, Clone)]
+struct ExerciseCandidate {
+    path_idx: usize,
+    exercise_value: f64,
+    profitability: f64,
+}
+
+impl PartialEq for ExerciseCandidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.profitability == other.profitability
+    }
+}
+
+impl Eq for ExerciseCandidate {}
+
+impl PartialOrd for ExerciseCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        // Reverse order for max-heap (highest profitability first)
+        other.profitability.partial_cmp(&self.profitability)
+    }
+}
+
+impl Ord for ExerciseCandidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+    }
+}
 
 // Helper function to interpolate the credit curve linearly
 fn interpolate(curve: &Vec<[f64; 2]>, time: f64) -> f64 {
@@ -176,9 +205,11 @@ fn price_exotic_warrant_core(
         (final_price - final_strike).max(0.0)
     });
 
-    // This map will track the number of warrants exercised in each calendar month
-    // to enforce the monthly exercise limit.
-    let mut monthly_exercise_counts: HashMap<usize, usize> = HashMap::new();
+    // Pre-allocate data structures for better performance
+    // Use Vec instead of HashMap for monthly counts (assuming max 12 months)
+    let mut monthly_exercise_counts = vec![0; 13]; // 0-12 months
+    let mut exercised_paths = vec![false; n_paths]; // Use Vec<bool> instead of HashSet
+    let mut exercise_heap = BinaryHeap::with_capacity(n_paths / 4); // Pre-allocate heap
 
     // Step 4: Perform the backward induction (Long-Schwartz algorithm).
     // We step back from maturity, deciding at each time step whether to exercise or hold.
@@ -213,9 +244,10 @@ fn price_exotic_warrant_core(
             None
         };
 
-        // Step 4c: Identify all paths where immediate exercise is optimal.
-        // This is where the core LSMC decision logic and the new monthly limit are applied.
-        let mut potential_exercisers: Vec<(usize, f64, f64)> = Vec::new(); // (path_idx, exercise_value, profitability)
+        // Step 4c: Identify all paths where immediate exercise is optimal using heap for efficiency.
+        // Clear the heap and exercised_paths for this time step
+        exercise_heap.clear();
+        exercised_paths.fill(false);
 
         for j in 0..n_paths {
             if default_times[j] > current_time {
@@ -241,35 +273,38 @@ fn price_exotic_warrant_core(
 
                     let effective_exercise_value = exercise_value.min(buyback_price);
 
-                    // If exercising now is more valuable than holding, add it to the list of candidates.
+                    // If exercising now is more valuable than holding, add it to the heap.
                     if effective_exercise_value > continuation_value {
                         let profitability = effective_exercise_value - continuation_value;
-                        potential_exercisers.push((j, effective_exercise_value, profitability));
+                        exercise_heap.push(ExerciseCandidate {
+                            path_idx: j,
+                            exercise_value: effective_exercise_value,
+                            profitability,
+                        });
                     }
                 }
             }
         }
 
-        // Step 4d: Enforce the monthly exercise limit.
-        // First, sort the candidates by profitability (how much better exercise is than holding).
-        // This assumes the most "in-the-money" holders will exercise first.
-        potential_exercisers.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal));
-
+        // Step 4d: Enforce the monthly exercise limit using heap (O(log n) per extraction).
         // Determine the limit for the current calendar month.
         let current_month = (current_time * 12.0).floor() as usize;
         let max_monthly_exercises = (n_paths as f64 * monthly_exercise_limit).floor() as usize;
-        let exercised_count_this_month = monthly_exercise_counts.entry(current_month).or_insert(0);
-        let mut allowed_exercises = max_monthly_exercises.saturating_sub(*exercised_count_this_month);
+        
+        // Use direct array access instead of HashMap
+        let current_month_idx = current_month.min(12); // Cap at 12 months
+        let mut allowed_exercises = max_monthly_exercises.saturating_sub(monthly_exercise_counts[current_month_idx]);
 
         // Step 4e: Update warrant values based on the (limited) exercise decisions.
-        // We iterate through the profitable exercisers and "fill" the monthly quota.
-        let mut exercised_paths = HashSet::new();
-        for (path_idx, exercise_value, _) in potential_exercisers.into_iter() {
+        // Extract from heap in order of profitability (most profitable first).
+        let mut exercises_this_step = 0;
+        while let Some(candidate) = exercise_heap.pop() {
             if allowed_exercises > 0 {
                 // This path exercises: its value for this time step is the exercise value.
-                warrant_values[path_idx] = exercise_value;
-                exercised_paths.insert(path_idx);
+                warrant_values[candidate.path_idx] = candidate.exercise_value;
+                exercised_paths[candidate.path_idx] = true;
                 allowed_exercises -= 1;
+                exercises_this_step += 1;
             } else {
                 // The monthly limit has been reached. No more exercises are allowed.
                 // Paths that were optimal to exercise but were blocked are now forced to "hold".
@@ -278,8 +313,8 @@ fn price_exotic_warrant_core(
         }
 
         // Update the total count of exercises for the month.
-        if !exercised_paths.is_empty() {
-            *exercised_count_this_month += exercised_paths.len();
+        if exercises_this_step > 0 {
+            monthly_exercise_counts[current_month_idx] += exercises_this_step;
         }
 
         // Step 4f: Update the values for all paths that did not exercise in this step.
@@ -287,7 +322,7 @@ fn price_exotic_warrant_core(
             if default_times[j] <= current_time {
                 // If the path defaulted previously, its value is the fixed recovery rate.
                 warrant_values[j] = recovery_rate;
-            } else if !exercised_paths.contains(&j) {
+            } else if !exercised_paths[j] {
                 // If the path did not exercise (either by choice or due to the limit),
                 // its value is the discounted value from the next time step (the continuation value).
                 let r = interpolate(&forward_curve, current_time);

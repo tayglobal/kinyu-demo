@@ -121,6 +121,45 @@
             text-align: center;
             color: #7f8c8d;
             font-style: italic;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .loading-details {
+            background: #ecf0f1;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            text-align: left;
+        }
+        
+        .loading-details h4 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+        
+        .loading-details ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        
+        .loading-details li {
+            margin: 5px 0;
+            color: #34495e;
         }
         
         .error {
@@ -340,7 +379,20 @@
         </div>
 
         <div id="loading" class="loading" style="display: none;">
-            Calculating warrant price... This may take a few seconds.
+            <div class="spinner"></div>
+            <h3>🔄 Calculating Warrant Price</h3>
+            <p>Running Monte Carlo simulation with thousands of paths...</p>
+            <div class="loading-details">
+                <h4>What's happening:</h4>
+                <ul>
+                    <li>Generating random stock price paths</li>
+                    <li>Simulating weekly strike resets</li>
+                    <li>Calculating default probabilities</li>
+                    <li>Running Longstaff-Schwartz regression</li>
+                    <li>Optimizing exercise decisions</li>
+                </ul>
+                <p><strong>Note:</strong> This calculation may take 10-30 seconds depending on the number of paths and time steps.</p>
+            </div>
         </div>
 
         <div id="error" class="error" style="display: none;">
@@ -349,7 +401,7 @@
     </div>
 
     <script type="module">
-        import init, { price_exotic_warrant_wasm, test_wasm, simple_test_calculation, test_random_generation, debug_calculation, simple_option_test, minimal_test, test_random_seed_variation, test_price_variation_with_seeds, test_seed_functionality } from './pkg/warrants_wasm.js';
+        import init, { price_exotic_warrant_wasm, test_wasm, simple_test_calculation, test_random_generation, debug_calculation, simple_option_test, minimal_test, test_random_seed_variation, test_price_variation_with_seeds, test_seed_functionality } from './pkg/warrants_wasm.js?v=20240929';
         
         let wasmInitialized = false;
         
@@ -437,12 +489,21 @@
                 console.log('forward_curve_flat:', forward_curve_flat);
                 console.log('credit_spreads_flat:', credit_spreads_flat);
                 
+                // Update loading message with calculation details
+                const loadingDetails = document.querySelector('.loading-details p:last-child');
+                if (loadingDetails) {
+                    loadingDetails.innerHTML = `<strong>Running simulation:</strong> ${n_paths.toLocaleString()} paths × ${n_steps} time steps = ${(n_paths * n_steps).toLocaleString()} calculations`;
+                }
+                
+                // Allow UI to update before starting the calculation
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
                 const startTime = performance.now();
                 const price = price_exotic_warrant_wasm(
                     s0, strike_discount, buyback_price, t,
                     forward_curve_flat, sigma, credit_spreads_flat,
                     equity_credit_corr, recovery_rate, monthly_exercise_limit,
-                    n_paths, n_steps, poly_degree
+                    n_paths, n_steps, poly_degree, null
                 );
                 const endTime = performance.now();
                 
