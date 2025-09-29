@@ -11,6 +11,12 @@ import sys
 from urllib.parse import urlparse
 
 class CORSHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        """Override to handle cache-busting query parameters."""
+        # Parse the URL and remove the query string
+        self.path = urlparse(self.path).path
+        super().do_GET()
+
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
