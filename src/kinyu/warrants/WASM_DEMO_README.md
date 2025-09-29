@@ -31,6 +31,22 @@ If you have another HTTP server available (like `python -m http.server`, Node.js
 
 **Important**: WebAssembly modules require proper MIME types and CORS headers, so make sure your server is configured correctly.
 
+## Publishing the Demo to GitHub Pages
+
+To make the live demo available at
+`https://tayglobal.github.io/kinyu-demo/demo/warrant`, copy the HTML shell and
+the generated WebAssembly assets into the repository's `docs/` folder before
+pushing to the default branch:
+
+```bash
+mkdir -p docs/demo/warrant/pkg
+cp src/kinyu/warrants/warrants_demo.html docs/demo/warrant/index.html
+cp src/kinyu/warrants/pkg/* docs/demo/warrant/pkg/
+```
+
+Running these commands after building the WebAssembly package keeps the GitHub
+Pages site in sync with the latest demo build.
+
 ## Building from Source
 
 If you need to rebuild the WebAssembly module:
