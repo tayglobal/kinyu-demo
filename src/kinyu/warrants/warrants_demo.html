@@ -299,11 +299,6 @@
                     <label for="poly_degree">Polynomial Degree for Regression</label>
                     <input type="number" id="poly_degree" value="2" step="1" min="1" max="5">
                 </div>
-
-                <div class="form-group">
-                    <label for="monthly_exercise_limit">Monthly Exercise Limit (0.0 to 1.0)</label>
-                    <input type="number" id="monthly_exercise_limit" value="1.0" step="0.01" min="0" max="1.0">
-                </div>
                 
                 <div class="form-group">
                     <label for="seed">Random Seed (0 for random)</label>
@@ -467,7 +462,6 @@
                 const n_paths = parseInt(document.getElementById('n_paths').value);
                 const n_steps = parseInt(document.getElementById('n_steps').value);
                 const poly_degree = parseInt(document.getElementById('poly_degree').value);
-                const monthly_exercise_limit = parseFloat(document.getElementById('monthly_exercise_limit').value);
                 const model_default_risk = document.getElementById('model_default_risk').checked;
                 const seedValue = parseInt(document.getElementById('seed').value, 10);
                 const seed = seedValue === 0 ? null : BigInt(seedValue);
@@ -479,7 +473,6 @@
                 // Validate inputs
                 if (s0 <= 0 || strike_discount <= 0 || strike_discount > 1 || t <= 0 || 
                     sigma <= 0 || recovery_rate < 0 || recovery_rate > 1 || 
-                    monthly_exercise_limit < 0 || monthly_exercise_limit > 1 ||
                     n_paths < 1000 || n_steps < 50 || poly_degree < 1 || 
                     forward_curve.length < 2 || (model_default_risk && credit_spreads.length < 1)) {
                     throw new Error('Invalid input parameters. Please check your values.');
@@ -492,7 +485,7 @@
                 
                 // Call WebAssembly function
                 console.log('Calling WebAssembly function with parameters:');
-                console.log({s0, strike_discount, buyback_price, t, sigma, equity_credit_corr, recovery_rate, monthly_exercise_limit, n_paths, n_steps, poly_degree, seed});
+                console.log({s0, strike_discount, buyback_price, t, sigma, equity_credit_corr, recovery_rate, n_paths, n_steps, poly_degree, seed});
                 console.log('forward_curve_flat:', forward_curve_flat);
                 console.log('credit_spreads_flat:', credit_spreads_flat);
                 
@@ -509,7 +502,7 @@
                 const price = price_exotic_warrant_wasm(
                     s0, strike_discount, buyback_price, t,
                     forward_curve_flat, sigma, credit_spreads_flat,
-                    equity_credit_corr, recovery_rate, monthly_exercise_limit,
+                    equity_credit_corr, recovery_rate,
                     n_paths, n_steps, poly_degree, seed
                 );
                 const endTime = performance.now();
@@ -533,7 +526,6 @@
                         <li>Volatility: ${(sigma * 100).toFixed(1)}%</li>
                         <li>Equity-Credit Correlation: ${equity_credit_corr}</li>
                         <li>Recovery Rate: ${(recovery_rate * 100).toFixed(1)}%</li>
-                        <li>Monthly Exercise Limit: ${monthly_exercise_limit}</li>
                         <li>Monte Carlo Paths: ${n_paths.toLocaleString()}</li>
                         <li>Time Steps: ${n_steps}</li>
                         <li>Polynomial Degree: ${poly_degree}</li>
@@ -600,28 +592,28 @@
                 lowRisk: {
                     s0: 100, strike_discount: 0.9, buyback_price: 15, t: 1, sigma: 0.2,
                     equity_credit_corr: -0.5, recovery_rate: 0.4, n_paths: 5000, n_steps: 252,
-                    poly_degree: 2, monthly_exercise_limit: 1.0, model_default_risk: true, seed: 123,
+                    poly_degree: 2, model_default_risk: true, seed: 123,
                     forward_curve: [[0, 0.05], [1, 0.05]],
                     credit_spreads: [[0, 0.001], [1, 0.001], [2, 0.001], [3, 0.001], [4, 0.001], [5, 0.001]]
                 },
                 highRisk: {
                     s0: 100, strike_discount: 0.9, buyback_price: 15, t: 1, sigma: 0.2,
                     equity_credit_corr: -0.5, recovery_rate: 0.4, n_paths: 5000, n_steps: 252,
-                    poly_degree: 2, monthly_exercise_limit: 1.0, model_default_risk: true, seed: 456,
+                    poly_degree: 2, model_default_risk: true, seed: 456,
                     forward_curve: [[0, 0.05], [1, 0.05]],
                     credit_spreads: [[0, 0.20], [1, 0.20], [2, 0.20], [3, 0.20], [4, 0.20], [5, 0.20]]
                 },
                 zeroCorr: {
                     s0: 100, strike_discount: 0.9, buyback_price: 15, t: 1, sigma: 0.2,
                     equity_credit_corr: 0.0, recovery_rate: 0.4, n_paths: 5000, n_steps: 252,
-                    poly_degree: 2, monthly_exercise_limit: 1.0, model_default_risk: true, seed: 789,
+                    poly_degree: 2, model_default_risk: true, seed: 789,
                     forward_curve: [[0, 0.05], [1, 0.05]],
                     credit_spreads: [[0, 0.01], [1, 0.01], [2, 0.01], [3, 0.01], [4, 0.01], [5, 0.01]]
                 },
                 highBuyback: {
                     s0: 100, strike_discount: 0.9, buyback_price: 1000, t: 1, sigma: 0.2,
                     equity_credit_corr: -0.5, recovery_rate: 0.4, n_paths: 5000, n_steps: 252,
-                    poly_degree: 2, monthly_exercise_limit: 1.0, model_default_risk: true, seed: 101,
+                    poly_degree: 2, model_default_risk: true, seed: 101,
                     forward_curve: [[0, 0.05], [1, 0.05]],
                     credit_spreads: [[0, 0.01], [1, 0.01], [2, 0.01], [3, 0.01], [4, 0.01], [5, 0.01]]
                 }

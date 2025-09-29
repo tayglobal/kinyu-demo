@@ -223,7 +223,6 @@ fn price_exotic_warrant_core(
     credit_spreads: &[(f64, f64)],
     equity_credit_corr: f64,
     recovery_rate: f64,
-    monthly_exercise_limit: f64,
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
@@ -265,6 +264,8 @@ fn price_exotic_warrant_core(
         }
     }
 
+    let mut exercised_paths = vec![false; n_paths];
+
     for i in (0..n_steps).rev() {
         let current_time = i as f64 * dt;
         let r = interpolate(forward_curve, current_time);
@@ -289,34 +290,43 @@ fn price_exotic_warrant_core(
             None
         };
 
-        for j in 0..n_paths {
-            let r = interpolate(forward_curve, current_time);
-            let discounted_value = warrant_values[j] * (-r * dt).exp();
+        exercised_paths.fill(false);
 
+        for j in 0..n_paths {
             if default_times[j] > current_time {
                 let stock_price = stock_paths[i][j];
                 let strike = strikes[i][j];
+                let exercise_value = (stock_price - strike).max(0.0);
 
-                if (stock_price - strike).max(0.0) > 0.0 {
-                    if let Some(ref b) = beta {
-                        let mut continuation_value = 0.0;
+                if exercise_value > 0.0 {
+                    let discounted_value = warrant_values[j] * (-r * dt).exp();
+
+                    let continuation_value = if let Some(ref b) = beta {
+                        let mut cv = 0.0;
                         for d in 0..b.len() {
-                            continuation_value += b[d] * stock_price.powi(d as i32);
+                            cv += b[d] * stock_price.powi(d as i32);
                         }
-
-                        if continuation_value > buyback_price {
-                            warrant_values[j] = buyback_price;
-                        } else {
-                            warrant_values[j] = discounted_value;
-                        }
+                        cv
                     } else {
-                        warrant_values[j] = discounted_value;
+                        discounted_value
+                    };
+
+                    let effective_exercise_value = exercise_value.min(buyback_price);
+
+                    if effective_exercise_value > continuation_value {
+                        warrant_values[j] = effective_exercise_value;
+                        exercised_paths[j] = true;
                     }
-                } else {
-                    warrant_values[j] = discounted_value;
                 }
-            } else {
+            }
+        }
+
+        for j in 0..n_paths {
+            if default_times[j] <= current_time {
                 warrant_values[j] = recovery_rate;
+            } else if !exercised_paths[j] {
+                let r = interpolate(forward_curve, current_time);
+                warrant_values[j] *= (-r * dt).exp();
             }
         }
     }
@@ -336,7 +346,6 @@ pub fn price_exotic_warrant_wasm(
     credit_spreads: &[f64], // Flattened array: [t1, s1, t2, s2, ...]
     equity_credit_corr: f64,
     recovery_rate: f64,
-    monthly_exercise_limit: f64,
     n_paths: usize,
     n_steps: usize,
     poly_degree: usize,
@@ -361,7 +370,7 @@ pub fn price_exotic_warrant_wasm(
     
     price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve_vec, sigma,
-        &credit_spreads_vec, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+        &credit_spreads_vec, equity_credit_corr, recovery_rate,
         n_paths, n_steps, poly_degree, seed
     )
 }
@@ -384,14 +393,13 @@ pub fn simple_test_calculation() -> f64 {
     let credit_spreads = vec![(0.0, 0.01), (1.0, 0.01)]; // Start at time 0
     let equity_credit_corr = -0.5;
     let recovery_rate = 0.4;
-    let monthly_exercise_limit = 1.0;
     let n_paths = 1000; // Smaller for testing
     let n_steps = 100;  // Smaller for testing
     let poly_degree = 2;
     
     price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-        &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+        &credit_spreads, equity_credit_corr, recovery_rate,
         n_paths, n_steps, poly_degree, None
     )
 }
@@ -453,14 +461,13 @@ pub fn minimal_test() -> f64 {
     let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)]; // Very low credit risk
     let equity_credit_corr = 0.0; // No correlation
     let recovery_rate = 0.4;
-    let monthly_exercise_limit = 1.0;
     let n_paths = 10; // Very small
     let n_steps = 2;  // Very small
     let poly_degree = 1; // Simple polynomial
     
     price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-        &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+        &credit_spreads, equity_credit_corr, recovery_rate,
         n_paths, n_steps, poly_degree, None
     )
 }
@@ -502,7 +509,6 @@ pub fn test_price_variation_with_seeds() -> f64 {
     let credit_spreads = vec![(0.0, 0.01), (1.0, 0.01)];
     let equity_credit_corr = -0.5;
     let recovery_rate = 0.4;
-    let monthly_exercise_limit = 1.0;
     let n_paths = 1000;
     let n_steps = 100;
     let poly_degree = 2;
@@ -510,14 +516,14 @@ pub fn test_price_variation_with_seeds() -> f64 {
     // Calculate price with seed 12345
     let price1 = price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-        &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+        &credit_spreads, equity_credit_corr, recovery_rate,
         n_paths, n_steps, poly_degree, Some(12345)
     );
     
     // Calculate price with seed 54321
     let price2 = price_exotic_warrant_core(
         s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-        &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+        &credit_spreads, equity_credit_corr, recovery_rate,
         n_paths, n_steps, poly_degree, Some(54321)
     );
     
@@ -692,14 +698,13 @@ mod tests {
         let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)];
         let equity_credit_corr = 0.0;
         let recovery_rate = 0.4;
-        let monthly_exercise_limit = 1.0;
         let n_paths = 100; // Small for fast test
         let n_steps = 10;
         let poly_degree = 1;
         
         let price = price_exotic_warrant_core(
             s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            &credit_spreads, equity_credit_corr, recovery_rate,
             n_paths, n_steps, poly_degree, Some(42)
         );
         
@@ -715,32 +720,32 @@ mod tests {
         
         // Test with invalid inputs - should return 0
         let price1 = price_exotic_warrant_core(
-            0.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 100, 10, 2, None
+            0.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 100, 10, 2, None
         );
         assert_eq!(price1, 0.0);
         
         let price2 = price_exotic_warrant_core(
-            100.0, 0.0, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 100, 10, 2, None
+            100.0, 0.0, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 100, 10, 2, None
         );
         assert_eq!(price2, 0.0);
         
         let price3 = price_exotic_warrant_core(
-            100.0, 0.9, 15.0, 0.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 100, 10, 2, None
+            100.0, 0.9, 15.0, 0.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 100, 10, 2, None
         );
         assert_eq!(price3, 0.0);
         
         let price4 = price_exotic_warrant_core(
-            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.0, &credit_spreads, 0.0, 0.4, 1.0, 100, 10, 2, None
+            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.0, &credit_spreads, 0.0, 0.4, 100, 10, 2, None
         );
         assert_eq!(price4, 0.0);
         
         let price5 = price_exotic_warrant_core(
-            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 0, 10, 2, None
+            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 0, 10, 2, None
         );
         assert_eq!(price5, 0.0);
         
         let price6 = price_exotic_warrant_core(
-            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 1.0, 100, 0, 2, None
+            100.0, 0.9, 15.0, 1.0, &forward_curve, 0.2, &credit_spreads, 0.0, 0.4, 100, 0, 2, None
         );
         assert_eq!(price6, 0.0);
     }
@@ -756,7 +761,6 @@ mod tests {
         let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)];
         let equity_credit_corr = 0.0;
         let recovery_rate = 0.4;
-        let monthly_exercise_limit = 1.0;
         let n_paths = 100;
         let n_steps = 10;
         let poly_degree = 1;
@@ -765,13 +769,13 @@ mod tests {
         // Run the same calculation twice with the same seed
         let price1 = price_exotic_warrant_core(
             s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            &credit_spreads, equity_credit_corr, recovery_rate,
             n_paths, n_steps, poly_degree, seed
         );
         
         let price2 = price_exotic_warrant_core(
             s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            &credit_spreads, equity_credit_corr, recovery_rate,
             n_paths, n_steps, poly_degree, seed
         );
         
@@ -802,20 +806,19 @@ mod tests {
         let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)];
         let equity_credit_corr = 0.0;
         let recovery_rate = 0.4;
-        let monthly_exercise_limit = 1.0;
         let n_paths = 100;
         let n_steps = 10;
         let poly_degree = 1;
         
         let price1 = price_exotic_warrant_core(
             s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            &credit_spreads, equity_credit_corr, recovery_rate,
             n_paths, n_steps, poly_degree, Some(12345)
         );
         
         let price2 = price_exotic_warrant_core(
             s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            &credit_spreads, equity_credit_corr, recovery_rate,
             n_paths, n_steps, poly_degree, Some(54321)
         );
         
@@ -835,14 +838,13 @@ mod tests {
         let credit_spreads = vec![(0.0, 0.001), (0.1, 0.001)];
         let equity_credit_corr = 0.0;
         let recovery_rate = 0.4;
-        let monthly_exercise_limit = 1.0;
         let n_paths = 10;
         let n_steps = 2;
         let poly_degree = 1;
         
         let price = price_exotic_warrant_core(
             s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            &credit_spreads, equity_credit_corr, recovery_rate,
             n_paths, n_steps, poly_degree, Some(42)
         );
         
@@ -862,14 +864,13 @@ mod tests {
         let credit_spreads = vec![(0.0, 0.01), (1.0, 0.01)];
         let equity_credit_corr = -0.5;
         let recovery_rate = 0.4;
-        let monthly_exercise_limit = 1.0;
         let n_paths = 1000;
         let n_steps = 100;
         let poly_degree = 2;
         
         let price = price_exotic_warrant_core(
             s0, strike_discount, buyback_price, t, &forward_curve, sigma,
-            &credit_spreads, equity_credit_corr, recovery_rate, monthly_exercise_limit,
+            &credit_spreads, equity_credit_corr, recovery_rate,
             n_paths, n_steps, poly_degree, Some(123)
         );
         
