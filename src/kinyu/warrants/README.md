@@ -4,7 +4,10 @@ This document explains how `price_exotic_warrant` in `src/lib.rs` prices a calla
 warrant whose strike is reset weekly at a discount to the spot price and that is
 subject to issuer buybacks and default risk. The pricing engine combines
 correlated equity/credit Monte Carlo simulation with Longstaff–Schwartz least
-squares regression to approximate the continuation value of the security.
+squares regression to approximate the continuation value of the security. A live
+web demonstration of the pricing workflow is also available; see the
+accompanying [WASM_DEMO_README.md](WASM_DEMO_README.md) for details on building and publishing the
+WebAssembly demo alongside this module.
 
 ## Model Inputs
 
