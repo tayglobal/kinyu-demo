@@ -88,7 +88,11 @@ def test_warrant_demo_calculation(live_server: str, page: Page):
         price_display = page.locator("#priceDisplay")
         price_text = price_display.inner_text()
 
-        assert price_text.startswith("$"), f"Price format is incorrect: {price_text}"
+        # With a fixed seed, the price should be deterministic.
+        # This assertion makes the test much more reliable.
+        expected_price = "$9.965589"
+        assert price_text == expected_price, f"Expected price {expected_price}, but got {price_text}"
+
         price_value = float(price_text.strip().replace("$", ""))
         assert price_value > 0, f"Calculated price was not positive: {price_value}"
 
