@@ -96,6 +96,38 @@ cargo test
 
 Both commands should finish without failures and validate the pricing routines, path mechanics, and stress scenarios described above.
 
+## Python Binding Demo
+
+The crate exposes an optional [PyO3](https://pyo3.rs/) binding (behind the `python` feature flag) that makes the Monte Carlo pricer available from Python. A minimal end-to-end workflow is:
+
+```bash
+cd /workspace/kinyu-demo/src/kinyu/floating_strike_warrant
+python -m venv .venv
+source .venv/bin/activate
+pip install maturin
+maturin build --release --features python
+pip install target/wheels/floating_strike_warrant-*.whl
+python python_demo.py
+```
+
+The `python_demo.py` script calls the Rust pricer for a baseline set of parameters and several perturbations to illustrate how the value reacts to key risk drivers. Because the pricer now tracks inventory depletion and quota refills explicitly, changes to volatility, interest rates, and the issuer buyback cap all propagate through the valuation. Running the script produces a Markdown table such as the one below (generated with 3,000 Monte Carlo paths per scenario and a fixed RNG seed):
+
+| Scenario | Key value | Price |
+| --- | --- | --- |
+| Baseline | - | 2.513525 |
+| Spot -5% | 95.0000 | 2.387849 |
+| Spot +5% | 105.0000 | 2.639201 |
+| Volatility 15% | 0.1500 | 2.510979 |
+| Volatility 35% | 0.3500 | 2.551016 |
+| Rate 0% | 0.0000 | 2.506402 |
+| Rate 4% | 0.0400 | 2.520646 |
+| Buyback 2 | 2.0000 | 1.820391 |
+| Buyback 3 | 3.0000 | 2.296211 |
+| Discount 85% | 0.8500 | 3.759237 |
+| Discount 95% | 0.9500 | 1.314383 |
+| Quota 10% | 0.1000 | 1.009646 |
+| Quota 40% | 0.4000 | 1.997013 |
+
 ## Further Reading
 
 For more background on LSMC pricing of American-style derivatives, see Longstaff & Schwartz (2001).

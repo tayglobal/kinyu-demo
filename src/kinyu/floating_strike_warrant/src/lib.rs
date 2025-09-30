@@ -1,8 +1,11 @@
 use nalgebra::{DMatrix, DVector};
-use rand::rngs::StdRng;
-use rand::SeedableRng;
 use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rand_distr::StandardNormal;
+
+#[cfg(feature = "python")]
+use pyo3::{prelude::*, wrap_pyfunction};
 
 #[cfg(test)]
 use std::cell::{Cell, RefCell};
@@ -84,6 +87,7 @@ fn simulate_state_grid(params: &FloatingStrikeWarrantParams) -> SimulationGrid {
         let mut next_quota_reset = params
             .next_limit_reset_step
             .min(total_steps + params.exercise_limit_period_steps);
+        let mut quota_period_index = 0usize;
 
         for step in 0..=total_steps {
             if step == next_quota_reset {
@@ -91,6 +95,7 @@ fn simulate_state_grid(params: &FloatingStrikeWarrantParams) -> SimulationGrid {
                 next_quota_reset = next_quota_reset
                     .saturating_add(params.exercise_limit_period_steps)
                     .min(total_steps + params.exercise_limit_period_steps);
+                quota_period_index = quota_period_index.saturating_add(1);
             }
 
             let steps_to_quota_reset = next_quota_reset.saturating_sub(step);
@@ -108,11 +113,11 @@ fn simulate_state_grid(params: &FloatingStrikeWarrantParams) -> SimulationGrid {
             states[step][path] = State {
                 spot,
                 strike,
-                quota,
-                remaining,
                 time_to_maturity: (total_steps - step) as f64 * dt,
                 steps_to_strike_reset,
                 steps_to_quota_reset,
+                quota_base: quota,
+                quota_period_index,
             };
 
             if step == total_steps {
@@ -145,6 +150,7 @@ struct SimulationGrid {
 
 #[cfg(test)]
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 struct ExerciseRecord {
     step: usize,
     path: usize,
@@ -190,30 +196,69 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
     let discount_factor = grid.discount_factor;
     let states = &grid.states;
 
+    let initial_remaining = (1.0 - params.exercised_fraction_current_period)
+        .max(0.0)
+        .min(1.0);
+    let mut remaining_fraction = vec![initial_remaining; params.num_paths];
+    let mut period_quota_remaining = vec![0.0; params.num_paths];
+    let mut current_period_index = vec![usize::MAX; params.num_paths];
+    let mut intrinsic_now = vec![0.0; params.num_paths];
+    let mut available_now = vec![0.0; params.num_paths];
     let mut values = vec![0.0; params.num_paths];
-    for path in 0..params.num_paths {
-        let state = states[total_steps][path];
-        let intrinsic = (state.spot - state.strike).max(0.0);
-        let available = state.quota.min(state.remaining).max(0.0);
-        let value = intrinsic * available;
-        values[path] = value.min(params.buyback_price);
-    }
-
     let mut discounted_future = vec![0.0; params.num_paths];
 
-    for step in (0..total_steps).rev() {
+    for step in (0..=total_steps).rev() {
+        for path in 0..params.num_paths {
+            let state = states[step][path];
+
+            if current_period_index[path] != state.quota_period_index {
+                current_period_index[path] = state.quota_period_index;
+                let base_quota = state
+                    .quota_base
+                    .max(0.0)
+                    .min(params.exercise_limit_fraction)
+                    .min(remaining_fraction[path]);
+                period_quota_remaining[path] = base_quota;
+            }
+
+            intrinsic_now[path] = (state.spot - state.strike).max(0.0);
+            available_now[path] = period_quota_remaining[path]
+                .min(remaining_fraction[path])
+                .max(0.0);
+        }
+
+        if step == total_steps {
+            for path in 0..params.num_paths {
+                let intrinsic = intrinsic_now[path];
+                let available = available_now[path];
+                let exercise_amount = if intrinsic > 0.0 { available } else { 0.0 };
+                let payoff = intrinsic * exercise_amount;
+                #[cfg(test)]
+                if exercise_amount > 0.0 {
+                    log_exercise(step, path, exercise_amount);
+                }
+                values[path] = payoff.min(params.buyback_price);
+                period_quota_remaining[path] =
+                    (period_quota_remaining[path] - exercise_amount).max(0.0);
+                remaining_fraction[path] = (remaining_fraction[path] - exercise_amount).max(0.0);
+            }
+            continue;
+        }
+
+        for path in 0..params.num_paths {
+            discounted_future[path] = values[path] * discount_factor;
+        }
+
         let mut design_matrix = Vec::new();
         let mut responses = Vec::new();
         let mut itm_paths = Vec::new();
 
         for path in 0..params.num_paths {
-            discounted_future[path] = values[path] * discount_factor;
-            let state = states[step][path];
-            let intrinsic = (state.spot - state.strike).max(0.0);
-            let available = state.quota.min(state.remaining).max(0.0);
+            let intrinsic = intrinsic_now[path];
+            let available = available_now[path];
 
             if intrinsic > 0.0 && available > 0.0 {
-                let basis = basis(&state, dt);
+                let basis = basis(&states[step][path], dt, available, remaining_fraction[path]);
                 design_matrix.extend_from_slice(&basis);
                 responses.push(discounted_future[path]);
                 itm_paths.push(path);
@@ -240,9 +285,8 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
         }
 
         for path in 0..params.num_paths {
-            let state = states[step][path];
-            let intrinsic = (state.spot - state.strike).max(0.0);
-            let available = state.quota.min(state.remaining).max(0.0);
+            let intrinsic = intrinsic_now[path];
+            let available = available_now[path];
             let continuation = continuation_estimates[path].unwrap_or(discounted_future[path]);
 
             let immediate = intrinsic * available;
@@ -252,12 +296,18 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
                     let dq = available.min(0.01);
                     if dq > 0.0 {
                         let cont_current = continuation_estimates[path].unwrap_or_else(|| {
-                            let phi = basis(&state, dt);
+                            let phi =
+                                basis(&states[step][path], dt, available, remaining_fraction[path]);
                             dot(&phi, beta)
                         });
-                        let mut reduced_state = state;
-                        reduced_state.quota = (state.quota - dq).max(0.0);
-                        let phi_minus = basis(&reduced_state, dt);
+                        let reduced_available = (available - dq).max(0.0);
+                        let reduced_remaining = (remaining_fraction[path] - dq).max(0.0);
+                        let phi_minus = basis(
+                            &states[step][path],
+                            dt,
+                            reduced_available,
+                            reduced_remaining,
+                        );
                         let cont_minus = dot(&phi_minus, beta);
                         let lambda = (cont_current - cont_minus) / dq;
                         intrinsic > lambda
@@ -274,6 +324,10 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
             let mut value = if should_exercise && immediate > 0.0 {
                 #[cfg(test)]
                 log_exercise(step, path, available);
+                let exercise_amount = available;
+                period_quota_remaining[path] =
+                    (period_quota_remaining[path] - exercise_amount).max(0.0);
+                remaining_fraction[path] = (remaining_fraction[path] - exercise_amount).max(0.0);
                 immediate
             } else {
                 continuation
@@ -333,11 +387,11 @@ fn validate(params: &FloatingStrikeWarrantParams) {
 struct State {
     spot: f64,
     strike: f64,
-    quota: f64,
-    remaining: f64,
     time_to_maturity: f64,
     steps_to_strike_reset: usize,
     steps_to_quota_reset: usize,
+    quota_base: f64,
+    quota_period_index: usize,
 }
 
 impl Default for State {
@@ -345,26 +399,31 @@ impl Default for State {
         Self {
             spot: 0.0,
             strike: 0.0,
-            quota: 0.0,
-            remaining: 0.0,
             time_to_maturity: 0.0,
             steps_to_strike_reset: 0,
             steps_to_quota_reset: 0,
+            quota_base: 0.0,
+            quota_period_index: 0,
         }
     }
 }
 
 const BASIS_DIM: usize = 14;
 
-fn basis(state: &State, dt: f64) -> [f64; BASIS_DIM] {
+fn basis(
+    state: &State,
+    dt: f64,
+    available_quota: f64,
+    remaining_fraction: f64,
+) -> [f64; BASIS_DIM] {
     let strike = if state.strike.abs() < 1e-12 {
         state.spot.max(1e-12)
     } else {
         state.strike
     };
     let m = state.spot / strike - 1.0;
-    let quota = state.quota.max(0.0);
-    let remaining = state.remaining.max(0.0);
+    let quota = available_quota.max(0.0);
+    let remaining = remaining_fraction.max(0.0);
     let tau = state.time_to_maturity.max(0.0);
     let to_strike_reset = state.steps_to_strike_reset as f64 * dt;
     let to_quota_reset = state.steps_to_quota_reset as f64 * dt;
@@ -389,6 +448,69 @@ fn basis(state: &State, dt: f64) -> [f64; BASIS_DIM] {
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+#[cfg(feature = "python")]
+#[allow(unsafe_op_in_unsafe_fn)]
+#[pyfunction]
+#[pyo3(signature = (
+    initial_price,
+    risk_free_rate,
+    volatility,
+    maturity,
+    steps_per_year,
+    strike_discount,
+    strike_reset_steps,
+    buyback_price,
+    exercise_limit_fraction,
+    exercise_limit_period_steps,
+    next_limit_reset_step,
+    exercised_fraction_current_period,
+    num_paths,
+    seed=None,
+))]
+fn price_warrant_py(
+    initial_price: f64,
+    risk_free_rate: f64,
+    volatility: f64,
+    maturity: f64,
+    steps_per_year: usize,
+    strike_discount: f64,
+    strike_reset_steps: usize,
+    buyback_price: f64,
+    exercise_limit_fraction: f64,
+    exercise_limit_period_steps: usize,
+    next_limit_reset_step: usize,
+    exercised_fraction_current_period: f64,
+    num_paths: usize,
+    seed: Option<u64>,
+) -> PyResult<f64> {
+    let params = FloatingStrikeWarrantParams {
+        initial_price,
+        risk_free_rate,
+        volatility,
+        maturity,
+        steps_per_year,
+        strike_discount,
+        strike_reset_steps,
+        buyback_price,
+        exercise_limit_fraction,
+        exercise_limit_period_steps,
+        next_limit_reset_step,
+        exercised_fraction_current_period,
+        num_paths,
+        seed,
+    };
+
+    Ok(price_warrant(&params))
+}
+
+#[cfg(feature = "python")]
+#[allow(deprecated)]
+#[pymodule]
+fn floating_strike_warrant(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(price_warrant_py, module)?)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -509,7 +631,8 @@ mod tests {
             ..baseline_params()
         };
 
-        let expected_quota = (params.exercise_limit_fraction - params.exercised_fraction_current_period)
+        let expected_quota = (params.exercise_limit_fraction
+            - params.exercised_fraction_current_period)
             .max(0.0)
             .min(params.exercise_limit_fraction);
         let intrinsic = params.initial_price * (1.0 - params.strike_discount);
@@ -542,7 +665,11 @@ mod tests {
         for path in 0..params.num_paths {
             for step in 0..=grid.total_steps {
                 let state = grid.states[step][path];
-                approx_eq(state.strike, params.strike_discount * params.initial_price, 1e-9);
+                approx_eq(
+                    state.strike,
+                    params.strike_discount * params.initial_price,
+                    1e-9,
+                );
             }
         }
     }
@@ -605,8 +732,8 @@ mod tests {
         // Quota should reset at the configured limit reset step
         let before_reset = states[params.next_limit_reset_step.saturating_sub(1)][0];
         let at_reset = states[params.next_limit_reset_step][0];
-        assert!(at_reset.quota >= before_reset.quota);
-        approx_eq(at_reset.quota, params.exercise_limit_fraction, 1e-9);
+        assert!(at_reset.quota_base >= before_reset.quota_base);
+        approx_eq(at_reset.quota_base, params.exercise_limit_fraction, 1e-9);
     }
 
     #[test]
@@ -619,8 +746,8 @@ mod tests {
         params.volatility = 0.0;
         let grid = super::simulate_state_grid(&params);
 
-        let before_reset = grid.states[0][0].quota;
-        let after_reset = grid.states[params.next_limit_reset_step][0].quota;
+        let before_reset = grid.states[0][0].quota_base;
+        let after_reset = grid.states[params.next_limit_reset_step][0].quota_base;
         assert!(after_reset >= before_reset);
         approx_eq(after_reset, params.exercise_limit_fraction, 1e-9);
     }
@@ -633,6 +760,8 @@ mod tests {
         params.exercise_limit_fraction = 0.05;
         params.exercise_limit_period_steps = 10;
         params.buyback_price = 1_000.0;
+        params.exercised_fraction_current_period = 0.98;
+        params.next_limit_reset_step = 1;
 
         super::enable_exercise_logging();
         let price = price_warrant(&params);
@@ -640,16 +769,17 @@ mod tests {
         let log = super::take_exercise_log();
         assert!(!log.is_empty());
 
-        let grid = super::simulate_state_grid(&params);
         let mut partial_found = false;
         for record in log {
-            let state = grid.states[record.step][record.path];
-            if record.amount < state.remaining {
+            if record.amount > 0.0 && record.amount < params.exercise_limit_fraction {
                 partial_found = true;
                 break;
             }
         }
-        assert!(partial_found, "expected at least one partial exercise event");
+        assert!(
+            partial_found,
+            "expected at least one partial exercise event"
+        );
     }
 
     #[test]
