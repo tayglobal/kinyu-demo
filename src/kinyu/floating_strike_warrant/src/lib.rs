@@ -1,8 +1,11 @@
 use nalgebra::{DMatrix, DVector};
-use rand::Rng;
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
+use rand::Rng;
 use rand_distr::StandardNormal;
+
+#[cfg(test)]
+use std::cell::{Cell, RefCell};
 
 /// Parameters that fully describe the floating-strike warrant simulation.
 #[derive(Debug, Clone)]
@@ -44,9 +47,22 @@ pub struct FloatingStrikeWarrantParams {
 pub fn price_warrant(params: &FloatingStrikeWarrantParams) -> f64 {
     validate(params);
 
+    let grid = simulate_state_grid(params);
+    lsmc_price(params, &grid)
+}
+
+fn simulate_state_grid(params: &FloatingStrikeWarrantParams) -> SimulationGrid {
     let total_steps = (params.maturity * params.steps_per_year as f64).ceil() as usize;
     let total_steps = total_steps.max(1);
-    let dt = params.maturity / total_steps as f64;
+    let dt = if total_steps == 0 {
+        0.0
+    } else {
+        if params.maturity == 0.0 {
+            0.0
+        } else {
+            params.maturity / total_steps as f64
+        }
+    };
     let discount_factor = (-params.risk_free_rate * dt).exp();
     let drift = (params.risk_free_rate - 0.5 * params.volatility * params.volatility) * dt;
     let vol_term = params.volatility * dt.sqrt();
@@ -111,6 +127,68 @@ pub fn price_warrant(params: &FloatingStrikeWarrantParams) -> f64 {
             }
         }
     }
+
+    SimulationGrid {
+        states,
+        total_steps,
+        dt,
+        discount_factor,
+    }
+}
+
+struct SimulationGrid {
+    states: Vec<Vec<State>>,
+    total_steps: usize,
+    dt: f64,
+    discount_factor: f64,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug)]
+struct ExerciseRecord {
+    step: usize,
+    path: usize,
+    amount: f64,
+}
+
+#[cfg(test)]
+thread_local! {
+    static LOG_ENABLED: Cell<bool> = Cell::new(false);
+    static EXERCISE_LOG: RefCell<Vec<ExerciseRecord>> = RefCell::new(Vec::new());
+}
+
+#[cfg(test)]
+fn enable_exercise_logging() {
+    LOG_ENABLED.with(|flag| flag.set(true));
+    EXERCISE_LOG.with(|log| log.borrow_mut().clear());
+}
+
+#[cfg(test)]
+fn take_exercise_log() -> Vec<ExerciseRecord> {
+    LOG_ENABLED.with(|flag| flag.set(false));
+    EXERCISE_LOG.with(|log| log.borrow_mut().drain(..).collect())
+}
+
+#[cfg(test)]
+fn log_exercise(step: usize, path: usize, amount: f64) {
+    if amount <= 0.0 {
+        return;
+    }
+
+    LOG_ENABLED.with(|flag| {
+        if flag.get() {
+            EXERCISE_LOG.with(|log| {
+                log.borrow_mut().push(ExerciseRecord { step, path, amount });
+            });
+        }
+    });
+}
+
+fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f64 {
+    let total_steps = grid.total_steps;
+    let dt = grid.dt;
+    let discount_factor = grid.discount_factor;
+    let states = &grid.states;
 
     let mut values = vec![0.0; params.num_paths];
     for path in 0..params.num_paths {
@@ -194,6 +272,8 @@ pub fn price_warrant(params: &FloatingStrikeWarrantParams) -> f64 {
             };
 
             let mut value = if should_exercise && immediate > 0.0 {
+                #[cfg(test)]
+                log_exercise(step, path, available);
                 immediate
             } else {
                 continuation
@@ -218,8 +298,8 @@ fn validate(params: &FloatingStrikeWarrantParams) {
         "Volatility must be non-negative"
     );
     assert!(
-        params.maturity.is_finite() && params.maturity > 0.0,
-        "Maturity must be positive"
+        params.maturity.is_finite() && params.maturity >= 0.0,
+        "Maturity must be non-negative"
     );
     assert!(params.steps_per_year > 0, "Steps per year must be positive");
     assert!(
@@ -315,6 +395,30 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
 mod tests {
     use super::*;
 
+    fn baseline_params() -> FloatingStrikeWarrantParams {
+        FloatingStrikeWarrantParams {
+            initial_price: 100.0,
+            risk_free_rate: 0.01,
+            volatility: 0.2,
+            maturity: 1.0,
+            steps_per_year: 52,
+            strike_discount: 0.9,
+            strike_reset_steps: 4,
+            buyback_price: 100.0,
+            exercise_limit_fraction: 0.2,
+            exercise_limit_period_steps: 21,
+            next_limit_reset_step: 10,
+            exercised_fraction_current_period: 0.0,
+            num_paths: 2048,
+            seed: Some(42),
+        }
+    }
+
+    fn approx_eq(a: f64, b: f64, tol: f64) {
+        let diff = (a - b).abs();
+        assert!(diff <= tol, "|{a} - {b}| = {diff} > {tol}");
+    }
+
     #[test]
     fn zero_volatility_produces_small_value_when_atm() {
         let params = FloatingStrikeWarrantParams {
@@ -361,5 +465,201 @@ mod tests {
         let price = price_warrant(&params);
         assert!(price.is_finite());
         assert!(price > 0.0);
+    }
+
+    #[test]
+    fn price_is_zero_when_quota_fully_exercised() {
+        let mut params = baseline_params();
+        params.exercised_fraction_current_period = params.exercise_limit_fraction;
+        params.next_limit_reset_step = params.steps_per_year * 2;
+        params.maturity = 0.25;
+        let price = price_warrant(&params);
+        assert!(price <= 1e-10, "price = {price}");
+    }
+
+    #[test]
+    fn price_is_zero_with_zero_buyback_price() {
+        let mut params = baseline_params();
+        params.buyback_price = 0.0;
+        let price = price_warrant(&params);
+        assert!(price.abs() <= 1e-10);
+    }
+
+    #[test]
+    fn high_buyback_price_does_not_cap_value() {
+        let mut capped = baseline_params();
+        capped.buyback_price = 5.0;
+        let capped_price = price_warrant(&capped);
+
+        let mut uncapped = capped.clone();
+        uncapped.buyback_price = 1_000.0;
+        let uncapped_price = price_warrant(&uncapped);
+
+        assert!(uncapped_price >= capped_price);
+        assert!(uncapped_price > 0.0);
+    }
+
+    #[test]
+    fn immediate_maturity_equals_intrinsic_times_quota() {
+        let params = FloatingStrikeWarrantParams {
+            maturity: 0.0,
+            strike_reset_steps: 10,
+            exercise_limit_fraction: 0.2,
+            exercised_fraction_current_period: 0.05,
+            ..baseline_params()
+        };
+
+        let expected_quota = (params.exercise_limit_fraction - params.exercised_fraction_current_period)
+            .max(0.0)
+            .min(params.exercise_limit_fraction);
+        let intrinsic = params.initial_price * (1.0 - params.strike_discount);
+        let expected = intrinsic * expected_quota;
+
+        let price = price_warrant(&params);
+        approx_eq(price, expected.min(params.buyback_price), 1e-9);
+    }
+
+    #[test]
+    fn no_quota_limit_matches_unconstrained_behaviour() {
+        let mut constrained = baseline_params();
+        constrained.exercise_limit_fraction = 0.1;
+        constrained.exercise_limit_period_steps = 21;
+        let constrained_price = price_warrant(&constrained);
+
+        let mut unconstrained = constrained.clone();
+        unconstrained.exercise_limit_fraction = 1.0;
+        unconstrained.exercise_limit_period_steps = 1;
+        let unconstrained_price = price_warrant(&unconstrained);
+
+        assert!(unconstrained_price >= constrained_price);
+    }
+
+    #[test]
+    fn no_strike_reset_behaves_like_fixed_strike() {
+        let mut params = baseline_params();
+        params.strike_reset_steps = 10_000;
+        let grid = super::simulate_state_grid(&params);
+        for path in 0..params.num_paths {
+            for step in 0..=grid.total_steps {
+                let state = grid.states[step][path];
+                approx_eq(state.strike, params.strike_discount * params.initial_price, 1e-9);
+            }
+        }
+    }
+
+    #[test]
+    fn reproducible_with_same_seed() {
+        let params = baseline_params();
+        let price1 = price_warrant(&params);
+        let price2 = price_warrant(&params);
+        approx_eq(price1, price2, 1e-12);
+    }
+
+    #[test]
+    fn price_increases_with_volatility() {
+        let mut params = baseline_params();
+        params.exercise_limit_fraction = 1.0;
+        params.exercise_limit_period_steps = 1;
+        params.buyback_price = 1_000.0;
+        params.strike_discount = 1.0;
+        params.num_paths = 8192;
+        params.volatility = 0.1;
+        let low_vol = price_warrant(&params);
+        params.volatility = 0.5;
+        let high_vol = price_warrant(&params);
+        assert!(high_vol > low_vol);
+    }
+
+    #[test]
+    fn price_increases_with_higher_strike_discount() {
+        let mut params = baseline_params();
+        params.strike_discount = 0.9;
+        let higher_discount = price_warrant(&params);
+        params.strike_discount = 0.8;
+        let deeper_discount = price_warrant(&params);
+        assert!(deeper_discount > higher_discount);
+    }
+
+    #[test]
+    fn strike_and_quota_reset_behaviour_matches_schedule() {
+        let mut params = baseline_params();
+        params.steps_per_year = 12;
+        params.maturity = 0.5;
+        params.strike_reset_steps = 2;
+        params.exercise_limit_period_steps = 3;
+        params.next_limit_reset_step = 2;
+        params.exercise_limit_fraction = 0.2;
+        params.num_paths = 1;
+        params.volatility = 0.0;
+        let grid = super::simulate_state_grid(&params);
+
+        let states = &grid.states;
+        // Strike should reset every 2 steps to discounted spot
+        for step in 0..=grid.total_steps {
+            let state = states[step][0];
+            if step > 0 && step % params.strike_reset_steps == 0 {
+                approx_eq(state.strike, state.spot * params.strike_discount, 1e-9);
+            }
+        }
+
+        // Quota should reset at the configured limit reset step
+        let before_reset = states[params.next_limit_reset_step.saturating_sub(1)][0];
+        let at_reset = states[params.next_limit_reset_step][0];
+        assert!(at_reset.quota >= before_reset.quota);
+        approx_eq(at_reset.quota, params.exercise_limit_fraction, 1e-9);
+    }
+
+    #[test]
+    fn quota_refills_after_reset() {
+        let mut params = baseline_params();
+        params.exercise_limit_fraction = 0.15;
+        params.exercised_fraction_current_period = 0.1;
+        params.next_limit_reset_step = 1;
+        params.num_paths = 1;
+        params.volatility = 0.0;
+        let grid = super::simulate_state_grid(&params);
+
+        let before_reset = grid.states[0][0].quota;
+        let after_reset = grid.states[params.next_limit_reset_step][0].quota;
+        assert!(after_reset >= before_reset);
+        approx_eq(after_reset, params.exercise_limit_fraction, 1e-9);
+    }
+
+    #[test]
+    fn partial_exercise_occurs_under_quota_cap() {
+        let mut params = baseline_params();
+        params.num_paths = 1;
+        params.volatility = 0.0;
+        params.exercise_limit_fraction = 0.05;
+        params.exercise_limit_period_steps = 10;
+        params.buyback_price = 1_000.0;
+
+        super::enable_exercise_logging();
+        let price = price_warrant(&params);
+        assert!(price > 0.0);
+        let log = super::take_exercise_log();
+        assert!(!log.is_empty());
+
+        let grid = super::simulate_state_grid(&params);
+        let mut partial_found = false;
+        for record in log {
+            let state = grid.states[record.step][record.path];
+            if record.amount < state.remaining {
+                partial_found = true;
+                break;
+            }
+        }
+        assert!(partial_found, "expected at least one partial exercise event");
+    }
+
+    #[test]
+    fn handles_large_number_of_paths() {
+        let mut params = baseline_params();
+        params.num_paths = 100_000;
+        params.steps_per_year = 26;
+        params.maturity = 0.5;
+        let price = price_warrant(&params);
+        assert!(price.is_finite());
+        assert!(price >= 0.0);
     }
 }
