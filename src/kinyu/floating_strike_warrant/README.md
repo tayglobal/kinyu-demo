@@ -52,19 +52,19 @@ We estimate the arbitrage-free price via an LSMC backward induction:
 2. **Continuation regression**: At each exercise step $t$, regress the discounted value $V_{t+\Delta}$ onto a feature basis $\Phi_t(S_t, K_t, q_t, \ldots)$ using singular value decomposition (SVD) to obtain a stable least-squares fit.
 3. **Exercise policy**: Compare the intrinsic value $g_t = \max(S_t - K_t, 0)$ with the estimated marginal continuation value. The optimal exercise fraction $x_t^*$ satisfies
 
-   $$
-   x_t^* =
-   \begin{cases}
-   0, & g_t \leq \lambda_t, \\
-   \min(q_t, x_{\max}), & g_t > \lambda_t,
-   \end{cases}
-   $$
+$$
+x_t^* =
+\begin{cases}
+0, & g_t \leq \lambda_t, \\
+\min(q_t, x_{\max}), & g_t > \lambda_t,
+\end{cases}
+$$
 
    where the shadow price of quota $\lambda_t$ is approximated by a finite difference of the continuation estimate:
 
-   $$
-   \lambda_t \approx \frac{\widehat{C}(q_t) - \widehat{C}(q_t - \delta q)}{\delta q}.
-   $$
+$$
+\lambda_t \approx \frac{\widehat{C}(q_t) - \widehat{C}(q_t - \delta q)}{\delta q}.
+$$
 
 4. **Discounting and aggregation**: Cash flows are discounted at the risk-free rate and averaged across paths to produce the warrant price.
 
