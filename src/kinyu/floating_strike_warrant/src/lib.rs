@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use nalgebra::{DMatrix, DVector};
+use std::collections::HashSet;
 use chrono::{Duration, NaiveDate, Utc};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -121,17 +122,16 @@ fn generate_paths(params: &WarrantParams) -> (Vec<Vec<PathState>>, f64) {
 
 fn build_basis_matrix(states: &[(&PathState, f64)]) -> DMatrix<f64> {
     let n_samples = states.len();
-    let n_features = 6;
+    // New basis: {q, q^2, m*q}. All terms are zero if q=0, which forces
+    // the continuation value C(S, q) to be zero if the quota is zero.
+    let n_features = 3;
     let mut x = DMatrix::zeros(n_samples, n_features);
     for (i, (state, quota)) in states.iter().enumerate() {
         let m = state.stock_price / state.strike_price;
         let q = *quota;
-        x[(i, 0)] = 1.0;
-        x[(i, 1)] = m;
-        x[(i, 2)] = m * m;
-        x[(i, 3)] = q;
-        x[(i, 4)] = q * q;
-        x[(i, 5)] = m * q;
+        x[(i, 0)] = q;
+        x[(i, 1)] = q * q;
+        x[(i, 2)] = m * q;
     }
     x
 }
@@ -143,77 +143,109 @@ fn price_warrant(params: WarrantParams) -> PyResult<f64> {
 
     let num_paths = params.num_paths;
     let num_steps = params.num_steps;
+    let discount_factor = (-(params.risk_free_rate * dt)).exp();
 
-    let mut cash_flows = DMatrix::zeros(num_paths, num_steps + 1);
-    let mut remaining_quota: DVector<f64> = DVector::from_fn(num_paths, |i, _| paths[i][num_steps].max_quota_for_period);
-
+    // V now stores the TOTAL value of the warrant for each path
     let mut V: DVector<f64> = DVector::from_fn(num_paths, |i, _| {
         let final_state = &paths[i][num_steps];
-        let intrinsic_value = (final_state.stock_price - final_state.strike_price).max(0.0);
-        let capped_value = intrinsic_value.min(params.buyback_price);
-        cash_flows[(i, num_steps)] = capped_value * remaining_quota[i];
-        capped_value
+        let per_unit_intrinsic = (final_state.stock_price - final_state.strike_price).max(0.0);
+        let per_unit_value = per_unit_intrinsic.min(params.buyback_price);
+        per_unit_value * final_state.max_quota_for_period
     });
 
+    let mut remaining_quota: DVector<f64> = DVector::from_fn(num_paths, |i, _| paths[i][num_steps].max_quota_for_period);
+
     for t in (0..num_steps).rev() {
+        // Update remaining quota for paths that cross a reset date
         for i in 0..num_paths {
-            if paths[i][t+1].max_quota_for_period != paths[i][t].max_quota_for_period {
-                remaining_quota[i] = paths[i][t].max_quota_for_period;
+            if paths[i][t + 1].max_quota_for_period != paths[i][t].max_quota_for_period {
+                remaining_quota[i] = paths[i][t + 1].max_quota_for_period;
             }
         }
 
-        let continuation_v = &V * (-(params.risk_free_rate * dt)).exp();
-        let mut estimated_continuation_v = continuation_v.clone();
+        let continuation_v = &V * discount_factor;
 
         let itm_path_indices: Vec<usize> = (0..num_paths)
-            .filter(|&i| paths[i][t].stock_price > paths[i][t].strike_price)
+            .filter(|&i| paths[i][t].stock_price > paths[i][t].strike_price && remaining_quota[i] > 1e-9)
             .collect();
+
+        let itm_set: HashSet<usize> = itm_path_indices.iter().cloned().collect();
+        let mut beta_opt: Option<DVector<f64>> = None;
 
         if !itm_path_indices.is_empty() {
             let itm_states_with_quota: Vec<(&PathState, f64)> = itm_path_indices.iter().map(|&i| (&paths[i][t], remaining_quota[i])).collect();
             let X = build_basis_matrix(&itm_states_with_quota);
             let Y = DVector::from_iterator(itm_path_indices.len(), itm_path_indices.iter().map(|&i| continuation_v[i]));
 
-            if let Ok(beta) = X.clone().svd(true, true).solve(&Y, 1e-10) {
-                let regression_fitted_values = &X * &beta;
-                for (idx, &i) in itm_path_indices.iter().enumerate() {
-                    estimated_continuation_v[i] = regression_fitted_values[idx].max(0.0);
+            if let Ok(beta) = X.svd(true, true).solve(&Y, 1e-10) {
+                beta_opt = Some(beta);
+            }
+        }
+
+        let mut next_V = V.clone();
+        for i in 0..num_paths {
+            let hold_value = continuation_v[i];
+
+            if !itm_set.contains(&i) {
+                next_V[i] = hold_value;
+                continue;
+            }
+
+            let state = &paths[i][t];
+            let per_unit_exercise_value = (state.stock_price - state.strike_price).max(0.0).min(params.buyback_price);
+            let q_i = remaining_quota[i];
+
+            if let Some(beta) = &beta_opt {
+                // Find optimal exercise amount `e` to maximize:
+                // f(e) = e * P + C(S, q - e)
+                // where P is per_unit_exercise_value and C is the continuation value from regression.
+                // C(S, q) = beta[0]*q + beta[1]*q^2 + beta[2]*m*q
+                let m = state.stock_price / state.strike_price;
+                let b0 = beta[0]; // Coeff for q
+                let b1 = beta[1]; // Coeff for q^2
+                let b2 = beta[2]; // Coeff for m*q
+
+                // f(e) is a quadratic in e: A*e^2 + B*e + C_val
+                let A = b1;
+                // dC/dq at q=q_i
+                let dC_dq = b0 + 2.0 * b1 * q_i + b2 * m;
+                let B = per_unit_exercise_value - dC_dq;
+
+                let optimal_e = if A >= -1e-9 { // Convex or linear: max is at a boundary
+                    if B > 0.0 { q_i } else { 0.0 }
+                } else { // Concave: max is at vertex, clamped to [0, q_i]
+                    let e_star = -B / (2.0 * A);
+                    e_star.max(0.0).min(q_i)
+                };
+
+                if optimal_e > 1e-9 {
+                    let exercised_value = optimal_e * per_unit_exercise_value;
+
+                    let q_after_exercise = q_i - optimal_e;
+                    let features_after = DVector::from_vec(vec![q_after_exercise, q_after_exercise * q_after_exercise, m * q_after_exercise]);
+                    let continuation_after_exercise = beta.dot(&features_after);
+
+                    let total_value = exercised_value + continuation_after_exercise;
+                    next_V[i] = total_value;
+                    remaining_quota[i] = q_after_exercise;
+                } else {
+                    next_V[i] = hold_value;
+                }
+            } else { // Fallback if regression fails
+                let exercise_all_value = per_unit_exercise_value * q_i;
+                if exercise_all_value > hold_value {
+                    next_V[i] = exercise_all_value;
+                    remaining_quota[i] = 0.0;
+                } else {
+                    next_V[i] = hold_value;
                 }
             }
         }
-
-        for i in 0..num_paths {
-            let state = &paths[i][t];
-            let intrinsic_value = (state.stock_price - state.strike_price).max(0.0);
-            let hold_value = estimated_continuation_v[i];
-
-            let exercise_is_optimal = intrinsic_value > hold_value;
-
-            let holder_optimal_value = if exercise_is_optimal { intrinsic_value } else { hold_value };
-            let final_per_unit_value = holder_optimal_value.min(params.buyback_price);
-
-            V[i] = final_per_unit_value;
-
-            if exercise_is_optimal && remaining_quota[i] > 0.0 {
-                cash_flows[(i, t)] = V[i] * remaining_quota[i];
-                remaining_quota[i] = 0.0;
-            } else {
-                cash_flows[(i, t)] = 0.0;
-            }
-        }
+        V = next_V;
     }
 
-    let mut total_pv = 0.0;
-    for i in 0..num_paths {
-        let mut path_pv = 0.0;
-        for t in 0..=num_steps {
-            let discount = (-(t as f64 * dt) * params.risk_free_rate).exp();
-            path_pv += cash_flows[(i, t)] * discount;
-        }
-        total_pv += path_pv;
-    }
-
-    Ok(total_pv / num_paths as f64)
+    // The final price is the mean of the risk-neutral expectation of the warrant's total value at t=0
+    Ok(V.mean())
 }
 
 #[pymodule]

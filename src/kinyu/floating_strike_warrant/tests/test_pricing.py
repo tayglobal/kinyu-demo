@@ -59,24 +59,41 @@ def test_volatility_sensitivity(warrant_params):
 def test_buyback_cap(warrant_params):
     """
     Tests that a low buyback price correctly caps the warrant's value.
+    This is tested by creating a scenario with no future quota refills,
+    no strike resets, and minimal volatility, to eliminate time value
+    and isolate the cap's effect.
     """
+    today = date.today()
     params_dict = warrant_params.copy()
-    # Deep in-the-money, low vol to make exercise highly likely
+
+    # Deep in-the-money
     params_dict["spot"] = 150.0
-    params_dict["vol"] = 0.1
+    # Minimal volatility to reduce time value
+    params_dict["vol"] = 0.01
+
     # Very low buyback price
     params_dict["buyback_price"] = 5.0
+
+    # Ensure maturity is BEFORE the next quota refill
+    params_dict["next_exercise_reset_date"] = today + timedelta(days=90)
+    params_dict["maturity_date"] = today + timedelta(days=89)
+
+    # Ensure no strike resets happen before maturity
+    params_dict["strike_reset_period_days"] = 91 # Longer than maturity
+
     params = fsw.WarrantParams(**params_dict)
 
     price = fsw.price_warrant(params)
     initial_quota = params.exercise_limit_percentage - params.exercised_this_period_percentage
     expected_capped_value = params.buyback_price * initial_quota
 
-    print(f"\nCalculated Price with low buyback: {price:.4f}")
+    print(f"\nCalculated Price with low buyback (no refill/reset, low vol): {price:.4f}")
     print(f"Expected Capped Value: {expected_capped_value:.4f}")
 
-    # The price should be very close to the capped value
-    assert abs(price - expected_capped_value) < 0.1
+    # In this simplified scenario, the price should be very close to the
+    # immediate, capped exercise value, plus or minus a small amount for
+    # discounting and residual time value.
+    assert abs(price - expected_capped_value) < 0.05
     print("\nBuyback cap test passed.")
 
 def test_quota_refill_value(warrant_params):
