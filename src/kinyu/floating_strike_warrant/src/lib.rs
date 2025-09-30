@@ -4,6 +4,9 @@ use rand::SeedableRng;
 use rand::Rng;
 use rand_distr::StandardNormal;
 
+#[cfg(feature = "python")]
+use pyo3::{prelude::*, wrap_pyfunction};
+
 #[cfg(test)]
 use std::cell::{Cell, RefCell};
 
@@ -389,6 +392,69 @@ fn basis(state: &State, dt: f64) -> [f64; BASIS_DIM] {
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+#[cfg(feature = "python")]
+#[allow(unsafe_op_in_unsafe_fn)]
+#[pyfunction]
+#[pyo3(signature = (
+    initial_price,
+    risk_free_rate,
+    volatility,
+    maturity,
+    steps_per_year,
+    strike_discount,
+    strike_reset_steps,
+    buyback_price,
+    exercise_limit_fraction,
+    exercise_limit_period_steps,
+    next_limit_reset_step,
+    exercised_fraction_current_period,
+    num_paths,
+    seed=None,
+))]
+fn price_warrant_py(
+    initial_price: f64,
+    risk_free_rate: f64,
+    volatility: f64,
+    maturity: f64,
+    steps_per_year: usize,
+    strike_discount: f64,
+    strike_reset_steps: usize,
+    buyback_price: f64,
+    exercise_limit_fraction: f64,
+    exercise_limit_period_steps: usize,
+    next_limit_reset_step: usize,
+    exercised_fraction_current_period: f64,
+    num_paths: usize,
+    seed: Option<u64>,
+) -> PyResult<f64> {
+    let params = FloatingStrikeWarrantParams {
+        initial_price,
+        risk_free_rate,
+        volatility,
+        maturity,
+        steps_per_year,
+        strike_discount,
+        strike_reset_steps,
+        buyback_price,
+        exercise_limit_fraction,
+        exercise_limit_period_steps,
+        next_limit_reset_step,
+        exercised_fraction_current_period,
+        num_paths,
+        seed,
+    };
+
+    Ok(price_warrant(&params))
+}
+
+#[cfg(feature = "python")]
+#[allow(deprecated)]
+#[pymodule]
+fn floating_strike_warrant(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
+    module.add_function(wrap_pyfunction!(price_warrant_py, module)?)?;
+    Ok(())
 }
 
 #[cfg(test)]

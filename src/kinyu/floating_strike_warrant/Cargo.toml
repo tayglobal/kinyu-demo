@@ -5,7 +5,16 @@ edition = "2024"
 description = "LSMC pricing engine for floating strike warrants with reset and exercise limits"
 license = "MIT OR Apache-2.0"
 
+[lib]
+name = "floating_strike_warrant"
+crate-type = ["lib", "cdylib"]
+
 [dependencies]
 rand = { version = "0.8", features = ["std"] }
 rand_distr = "0.4"
 nalgebra = { version = "0.32", features = ["std"] }
+pyo3 = { version = "0.21", optional = true }
+
+[features]
+default = []
+python = ["dep:pyo3", "pyo3/extension-module"]
