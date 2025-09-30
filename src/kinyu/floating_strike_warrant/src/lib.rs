@@ -102,12 +102,13 @@ fn simulate_state_grid(params: &FloatingStrikeWarrantParams) -> SimulationGrid {
             let steps_to_strike_reset = if params.strike_reset_steps == 0 {
                 0
             } else {
-                let remainder = params.strike_reset_steps - (step % params.strike_reset_steps);
-                if remainder == params.strike_reset_steps {
-                    0
+                let modulo = step % params.strike_reset_steps;
+                let until_next_reset = if modulo == 0 {
+                    params.strike_reset_steps
                 } else {
-                    remainder
-                }
+                    params.strike_reset_steps - modulo
+                };
+                until_next_reset.min(total_steps.saturating_sub(step))
             };
 
             states[step][path] = State {
@@ -727,6 +728,19 @@ mod tests {
             if step > 0 && step % params.strike_reset_steps == 0 {
                 approx_eq(state.strike, state.spot * params.strike_discount, 1e-9);
             }
+
+            let expected_steps_to_reset = if step == grid.total_steps {
+                0
+            } else {
+                let modulo = step % params.strike_reset_steps;
+                let until_next = if modulo == 0 {
+                    params.strike_reset_steps
+                } else {
+                    params.strike_reset_steps - modulo
+                };
+                until_next.min(grid.total_steps - step)
+            };
+            assert_eq!(state.steps_to_strike_reset, expected_steps_to_reset);
         }
 
         // Quota should reset at the configured limit reset step

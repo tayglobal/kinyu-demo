@@ -125,7 +125,7 @@ The `python_demo.py` script calls the Rust pricer for a baseline set of paramete
 | Buyback 3 | 3.0000 | 2.296211 |
 | Discount 85% | 0.8500 | 3.759237 |
 | Discount 95% | 0.9500 | 1.314383 |
-| Quota 10% | 0.1000 | 1.009646 |
+| Quota 10% | 0.1000 | 1.009535 |
 | Quota 40% | 0.4000 | 1.997013 |
 
 ## Further Reading
