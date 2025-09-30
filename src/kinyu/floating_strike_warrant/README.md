@@ -1,0 +1,102 @@
+# Floating Strike Warrant Pricer
+
+This crate implements a Longstaff–Schwartz Monte Carlo (LSMC) pricer for a floating-strike warrant with periodic strike resets, issuer buybacks, and exercise quota limits.
+
+## Contract Overview
+
+A floating-strike warrant entitles the holder to purchase the underlying equity at a strike that is periodically reset to a fixed discount of the prevailing spot. Let
+
+- $S_t$ be the underlying stock price at time $t$,
+- $d \in (0,1]$ be the strike discount,
+- $\tau^K$ be the strike reset interval (e.g., one week), and
+- $K_t$ be the strike immediately after the reset at time $t$.
+
+At each reset date $t \in \mathcal{T}^K$ we set
+
+$$
+K_t = d \cdot S_t.
+$$
+
+The holder can exercise any fraction $x_t \in [0, q_t]$ of the warrant inventory during a trading step, producing an immediate payoff of
+
+$$
+\text{payoff}(t, x_t) = x_t \cdot \max(S_t - K_t, 0).
+$$
+
+The remaining exercise allowance $q_t$ is capped. Define
+
+- $\bar{q}$ as the per-period exercise limit fraction,
+- $\tau^Q$ as the quota reset interval (e.g., monthly),
+- $t^Q$ the next quota reset time, and
+- $\Delta q_t$ the quantity already exercised within the current quota period.
+
+Between quota resets we have
+
+$$
+q_t = \max\bigl(0, \bar{q} - \Delta q_t\bigr),
+$$
+
+and at a quota reset time $t \in \mathcal{T}^Q$ the allowance is replenished to $\bar{q}$.
+
+The issuer may call back the warrant at a buyback price $B$; the holder's value is therefore truncated at $B$ whenever the call is available:
+
+$$
+V_t^{\text{post-call}} = \min\left(V_t^{\text{holder}}, B\right).
+$$
+
+## Pricing Methodology
+
+We estimate the arbitrage-free price via an LSMC backward induction:
+
+1. **Forward simulation**: Generate $N$ paths of the geometric Brownian motion underlying, applying strike resets and quota refills deterministically along each path.
+2. **Continuation regression**: At each exercise step $t$, regress the discounted value $V_{t+\Delta}$ onto a feature basis $\Phi_t(S_t, K_t, q_t, \ldots)$ using singular value decomposition (SVD) to obtain a stable least-squares fit.
+3. **Exercise policy**: Compare the intrinsic value $g_t = \max(S_t - K_t, 0)$ with the estimated marginal continuation value. The optimal exercise fraction $x_t^*$ satisfies
+
+   $$
+   x_t^* =
+   \begin{cases}
+   0, & g_t \leq \lambda_t, \\
+   \min(q_t, x_{\max}), & g_t > \lambda_t,
+   \end{cases}
+   $$
+
+   where the shadow price of quota $\lambda_t$ is approximated by a finite difference of the continuation estimate:
+
+   $$
+   \lambda_t \approx \frac{\widehat{C}(q_t) - \widehat{C}(q_t - \delta q)}{\delta q}.
+   $$
+
+4. **Discounting and aggregation**: Cash flows are discounted at the risk-free rate and averaged across paths to produce the warrant price.
+
+This approach captures both the floating strike mechanics and the binding exercise caps by embedding the remaining quota directly into the regression features.
+
+## Installation
+
+The pricer is packaged as an internal Rust crate. To build it you will need the Rust toolchain (recommended via [`rustup`](https://rustup.rs/)). Once Rust is installed, fetch the crate dependencies:
+
+```bash
+cd /workspace/kinyu-demo/src/kinyu/floating_strike_warrant
+cargo fetch
+```
+
+## Running the Tests
+
+Execute the unit test suite with:
+
+```bash
+cd /workspace/kinyu-demo
+cargo test -p floating_strike_warrant
+```
+
+or run all workspace tests:
+
+```bash
+cargo test
+```
+
+Both commands should finish without failures and validate the pricing routines, path mechanics, and stress scenarios described above.
+
+## Further Reading
+
+For more background on LSMC pricing of American-style derivatives, see Longstaff & Schwartz (2001).
+

@@ -1,0 +1,11 @@
+[package]
+name = "floating_strike_warrant"
+version = "0.1.0"
+edition = "2024"
+description = "LSMC pricing engine for floating strike warrants with reset and exercise limits"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+rand = { version = "0.8", features = ["std"] }
+rand_distr = "0.4"
+nalgebra = { version = "0.32", features = ["std"] }
