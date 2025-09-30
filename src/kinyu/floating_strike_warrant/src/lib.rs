@@ -50,8 +50,28 @@ pub struct FloatingStrikeWarrantParams {
 pub fn price_warrant(params: &FloatingStrikeWarrantParams) -> f64 {
     validate(params);
 
+    if params.maturity == 0.0 {
+        return immediate_exercise_value(params);
+    }
+
     let grid = simulate_state_grid(params);
     lsmc_price(params, &grid)
+}
+
+fn immediate_exercise_value(params: &FloatingStrikeWarrantParams) -> f64 {
+    let remaining_fraction = (1.0 - params.exercised_fraction_current_period).clamp(0.0, 1.0);
+    let mut quota = (params.exercise_limit_fraction - params.exercised_fraction_current_period)
+        .max(0.0)
+        .min(params.exercise_limit_fraction);
+
+    if params.next_limit_reset_step == 0 {
+        quota = params.exercise_limit_fraction.min(remaining_fraction);
+    }
+
+    let available = quota.min(remaining_fraction).max(0.0);
+    let intrinsic = (params.initial_price - params.initial_price * params.strike_discount).max(0.0);
+
+    (intrinsic * available).min(params.buyback_price)
 }
 
 fn simulate_state_grid(params: &FloatingStrikeWarrantParams) -> SimulationGrid {
@@ -349,6 +369,10 @@ fn validate(params: &FloatingStrikeWarrantParams) {
         "Initial price must be positive"
     );
     assert!(
+        params.risk_free_rate.is_finite(),
+        "Risk-free rate must be finite"
+    );
+    assert!(
         params.volatility.is_finite() && params.volatility >= 0.0,
         "Volatility must be non-negative"
     );
@@ -644,6 +668,26 @@ mod tests {
     }
 
     #[test]
+    fn immediate_maturity_with_instant_quota_reset_uses_full_limit() {
+        let params = FloatingStrikeWarrantParams {
+            maturity: 0.0,
+            next_limit_reset_step: 0,
+            exercise_limit_fraction: 0.3,
+            exercised_fraction_current_period: 0.1,
+            buyback_price: 1_000.0,
+            ..baseline_params()
+        };
+
+        let intrinsic = params.initial_price * (1.0 - params.strike_discount);
+        let remaining = (1.0 - params.exercised_fraction_current_period).clamp(0.0, 1.0);
+        let expected_quota = params.exercise_limit_fraction.min(remaining);
+        let expected = (intrinsic * expected_quota).min(params.buyback_price);
+
+        let price = price_warrant(&params);
+        approx_eq(price, expected, 1e-9);
+    }
+
+    #[test]
     fn no_quota_limit_matches_unconstrained_behaviour() {
         let mut constrained = baseline_params();
         constrained.exercise_limit_fraction = 0.1;
@@ -805,5 +849,14 @@ mod tests {
         let price = price_warrant(&params);
         assert!(price.is_finite());
         assert!(price >= 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Risk-free rate must be finite")]
+    fn rejects_non_finite_risk_free_rate() {
+        let mut params = baseline_params();
+        params.risk_free_rate = f64::NAN;
+        // Should panic via validation
+        let _ = price_warrant(&params);
     }
 }
