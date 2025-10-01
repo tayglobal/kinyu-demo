@@ -1,6 +1,6 @@
 # Floating Strike Warrant Pricer
 
-This crate implements a Longstaff–Schwartz Monte Carlo (LSMC) pricer for a floating-strike warrant with periodic strike resets, issuer buybacks, and exercise quota limits.
+This crate implements a Longstaff–Schwartz Monte Carlo (LSMC) pricer for a floating-strike warrant with periodic strike resets, issuer buybacks, holder put protection, and exercise quota limits.
 
 ## Contract Overview
 
@@ -42,6 +42,16 @@ The issuer may call back the warrant at a buyback price $B$; the holder's value 
 
 $$
 V_t^{\text{post-call}} = \min\left(V_t^{\text{holder}}, B\right).
+$$
+
+When the underlying trades below a contractual trigger level $S^\text{put}$, the warrant holder can demand an early buyback at a guaranteed price $P^\text{put}$. This creates an additional cash flow opportunity that competes with the continuation and call choices in the valuation:
+
+$$
+\text{HolderPutPayoff}_t =
+\begin{cases}
+P^\text{put}, & S_t \leq S^\text{put}, \\
+0, & \text{otherwise}.
+\end{cases}
 $$
 
 ## Pricing Methodology
@@ -110,23 +120,27 @@ pip install target/wheels/floating_strike_warrant-*.whl
 python python_demo.py
 ```
 
-The `python_demo.py` script calls the Rust pricer for a baseline set of parameters and several perturbations to illustrate how the value reacts to key risk drivers. Because the pricer now tracks inventory depletion and quota refills explicitly, changes to volatility, interest rates, and the issuer buyback cap all propagate through the valuation. Running the script produces a Markdown table such as the one below (generated with 3,000 Monte Carlo paths per scenario and a fixed RNG seed):
+The `python_demo.py` script calls the Rust pricer for a baseline set of parameters and several perturbations to illustrate how the value reacts to key risk drivers. Because the pricer now tracks inventory depletion, quota refills, and the holder put option explicitly, changes to volatility, interest rates, the issuer buyback cap, and the put terms all propagate through the valuation. Running the script produces a Markdown table such as the one below (generated with 3,000 Monte Carlo paths per scenario and a fixed RNG seed):
 
 | Scenario | Key value | Price |
 | --- | --- | --- |
-| Baseline | - | 2.513525 |
-| Spot -5% | 95.0000 | 2.387849 |
-| Spot +5% | 105.0000 | 2.639201 |
-| Volatility 15% | 0.1500 | 2.510979 |
-| Volatility 35% | 0.3500 | 2.551016 |
-| Rate 0% | 0.0000 | 2.506402 |
-| Rate 4% | 0.0400 | 2.520646 |
-| Buyback 2 | 2.0000 | 1.820391 |
-| Buyback 3 | 3.0000 | 2.296211 |
-| Discount 85% | 0.8500 | 3.759237 |
-| Discount 95% | 0.9500 | 1.314383 |
-| Quota 10% | 0.1000 | 1.009535 |
-| Quota 40% | 0.4000 | 1.997013 |
+| Baseline | - | 3.139163 |
+| Spot -5% | 95.0000 | 3.253824 |
+| Spot +5% | 105.0000 | 3.091662 |
+| Volatility 15% | 0.1500 | 2.620668 |
+| Volatility 35% | 0.3500 | 3.665311 |
+| Rate 0% | 0.0000 | 3.242602 |
+| Rate 4% | 0.0400 | 3.061998 |
+| Buyback 2 | 2.0000 | 1.886489 |
+| Buyback 3 | 3.0000 | 2.515118 |
+| Discount 85% | 0.8500 | 4.220395 |
+| Discount 95% | 0.9500 | 2.096318 |
+| Quota 10% | 0.1000 | 2.007972 |
+| Quota 40% | 0.4000 | 2.621859 |
+| Put trigger 85 | 85.0000 | 3.694463 |
+| Put trigger 70 | 70.0000 | 2.912962 |
+| Put price 4 | 4.0000 | 2.825968 |
+| Put price 8 | 8.0000 | 3.452860 |
 
 ## Further Reading
 

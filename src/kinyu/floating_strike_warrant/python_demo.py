@@ -23,6 +23,8 @@ BASELINE: Dict[str, Any] = {
     "strike_discount": 0.9,
     "strike_reset_steps": 5,
     "buyback_price": 25.0,
+    "holder_put_trigger_price": 75.0,
+    "holder_put_price": 6.0,
     "exercise_limit_fraction": 0.25,
     "exercise_limit_period_steps": 21,
     "next_limit_reset_step": 0,
@@ -46,6 +48,26 @@ SCENARIOS = [
     Scenario("Discount 95%", "Discount", {"strike_discount": 0.95}),
     Scenario("Quota 10%", "Quota", {"exercise_limit_fraction": 0.10}),
     Scenario("Quota 40%", "Quota", {"exercise_limit_fraction": 0.40}),
+    Scenario(
+        "Put trigger 85",
+        "Put trigger",
+        {"holder_put_trigger_price": 85.0},
+    ),
+    Scenario(
+        "Put trigger 70",
+        "Put trigger",
+        {"holder_put_trigger_price": 70.0},
+    ),
+    Scenario(
+        "Put price 4",
+        "Put price",
+        {"holder_put_price": 4.0},
+    ),
+    Scenario(
+        "Put price 8",
+        "Put price",
+        {"holder_put_price": 8.0},
+    ),
 ]
 
 
@@ -63,6 +85,8 @@ def main() -> None:
                 "Buyback": "buyback_price",
                 "Discount": "strike_discount",
                 "Quota": "exercise_limit_fraction",
+                "Put trigger": "holder_put_trigger_price",
+                "Put price": "holder_put_price",
             }
             source_key = key_map[scenario.focus]
             value = f"{params[source_key]:.4f}"
