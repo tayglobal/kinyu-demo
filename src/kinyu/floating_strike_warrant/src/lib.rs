@@ -55,7 +55,37 @@ pub fn price_warrant(params: &FloatingStrikeWarrantParams) -> f64 {
     validate(params);
 
     let grid = simulate_state_grid(params);
-    lsmc_price(params, &grid)
+    lsmc_price_internal(params, &grid, None)
+}
+
+/// Per-step expectations from the Monte Carlo valuation.
+#[derive(Debug, Clone)]
+pub struct WarrantTimeseriesPoint {
+    /// Simulation step index (0 corresponds to valuation time).
+    pub step: usize,
+    /// Elapsed time in years at the start of the step.
+    pub time: f64,
+    /// Expected warrant value at the start of the step.
+    pub expected_price: f64,
+    /// Expected immediate exercise value subject to quota limits.
+    pub exercise_upper_bound: f64,
+    /// Expected payoff from invoking the holder put protection.
+    pub put_lower_bound: f64,
+    /// Issuer buyback price that caps the warrant value.
+    pub buyback_upper_bound: f64,
+}
+
+/// Price the warrant and capture the simulated time series of bounds and values.
+pub fn price_warrant_with_timeseries(
+    params: &FloatingStrikeWarrantParams,
+) -> (f64, Vec<WarrantTimeseriesPoint>) {
+    validate(params);
+
+    let grid = simulate_state_grid(params);
+    let mut series = Vec::with_capacity(grid.total_steps + 1);
+    let price = lsmc_price_internal(params, &grid, Some(&mut series));
+    series.reverse();
+    (price, series)
 }
 
 fn simulate_state_grid(params: &FloatingStrikeWarrantParams) -> SimulationGrid {
@@ -195,7 +225,11 @@ fn log_exercise(step: usize, path: usize, amount: f64) {
     });
 }
 
-fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f64 {
+fn lsmc_price_internal(
+    params: &FloatingStrikeWarrantParams,
+    grid: &SimulationGrid,
+    mut series: Option<&mut Vec<WarrantTimeseriesPoint>>,
+) -> f64 {
     let total_steps = grid.total_steps;
     let dt = grid.dt;
     let discount_factor = grid.discount_factor;
@@ -213,6 +247,9 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
     let mut discounted_future = vec![0.0; params.num_paths];
 
     for step in (0..=total_steps).rev() {
+        let mut exercise_sum = 0.0;
+        let mut put_sum = 0.0;
+
         for path in 0..params.num_paths {
             let state = states[step][path];
 
@@ -230,6 +267,10 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
             available_now[path] = period_quota_remaining[path]
                 .min(remaining_fraction[path])
                 .max(0.0);
+            exercise_sum += intrinsic_now[path] * available_now[path];
+            if state.spot <= params.holder_put_trigger_price {
+                put_sum += params.holder_put_price * remaining_fraction[path];
+            }
         }
 
         if step == total_steps {
@@ -263,121 +304,137 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
 
                 values[path] = value.min(params.buyback_price);
             }
-            continue;
-        }
-
-        for path in 0..params.num_paths {
-            discounted_future[path] = values[path] * discount_factor;
-        }
-
-        let mut design_matrix = Vec::new();
-        let mut responses = Vec::new();
-        let mut itm_paths = Vec::new();
-
-        for path in 0..params.num_paths {
-            let intrinsic = intrinsic_now[path];
-            let available = available_now[path];
-
-            if intrinsic > 0.0 && available > 0.0 {
-                let basis = basis(&states[step][path], dt, available, remaining_fraction[path]);
-                design_matrix.extend_from_slice(&basis);
-                responses.push(discounted_future[path]);
-                itm_paths.push(path);
+        } else {
+            for path in 0..params.num_paths {
+                discounted_future[path] = values[path] * discount_factor;
             }
-        }
 
-        let mut continuation_estimates: Vec<Option<f64>> = vec![None; params.num_paths];
-        let mut beta_opt: Option<Vec<f64>> = None;
+            let mut design_matrix = Vec::new();
+            let mut responses = Vec::new();
+            let mut itm_paths = Vec::new();
 
-        if !itm_paths.is_empty() {
-            let rows = itm_paths.len();
-            let x = DMatrix::from_row_slice(rows, BASIS_DIM, &design_matrix);
-            let y = DVector::from_vec(responses);
-            let svd = x.svd(true, true);
-            let beta_matrix = svd.solve(&y, 1e-12).expect("SVD regression solve failed");
-            let beta_vec: Vec<f64> = beta_matrix.column(0).iter().copied().collect();
-            beta_opt = Some(beta_vec.clone());
+            for path in 0..params.num_paths {
+                let intrinsic = intrinsic_now[path];
+                let available = available_now[path];
 
-            for (row_idx, path_idx) in itm_paths.iter().enumerate() {
-                let slice = &design_matrix[row_idx * BASIS_DIM..(row_idx + 1) * BASIS_DIM];
-                let cont = dot(slice, &beta_vec);
-                continuation_estimates[*path_idx] = Some(cont);
+                if intrinsic > 0.0 && available > 0.0 {
+                    let basis = basis(&states[step][path], dt, available, remaining_fraction[path]);
+                    design_matrix.extend_from_slice(&basis);
+                    responses.push(discounted_future[path]);
+                    itm_paths.push(path);
+                }
             }
-        }
 
-        for path in 0..params.num_paths {
-            let state = states[step][path];
-            let intrinsic = intrinsic_now[path];
-            let available = available_now[path];
-            let continuation = continuation_estimates[path].unwrap_or(discounted_future[path]);
+            let mut continuation_estimates: Vec<Option<f64>> = vec![None; params.num_paths];
+            let mut beta_opt: Option<Vec<f64>> = None;
 
-            let immediate = intrinsic * available;
+            if !itm_paths.is_empty() {
+                let rows = itm_paths.len();
+                let x = DMatrix::from_row_slice(rows, BASIS_DIM, &design_matrix);
+                let y = DVector::from_vec(responses);
+                let svd = x.svd(true, true);
+                let beta_matrix = svd.solve(&y, 1e-12).expect("SVD regression solve failed");
+                let beta_vec: Vec<f64> = beta_matrix.column(0).iter().copied().collect();
+                beta_opt = Some(beta_vec.clone());
 
-            let should_exercise = if intrinsic > 0.0 && available > 1e-8 {
-                if let Some(beta) = &beta_opt {
-                    let dq = available.min(0.01);
-                    if dq > 0.0 {
-                        let cont_current = continuation_estimates[path].unwrap_or_else(|| {
-                            let phi =
-                                basis(&states[step][path], dt, available, remaining_fraction[path]);
-                            dot(&phi, beta)
-                        });
-                        let reduced_available = (available - dq).max(0.0);
-                        let reduced_remaining = (remaining_fraction[path] - dq).max(0.0);
-                        let phi_minus = basis(
-                            &states[step][path],
-                            dt,
-                            reduced_available,
-                            reduced_remaining,
-                        );
-                        let cont_minus = dot(&phi_minus, beta);
-                        let lambda = (cont_current - cont_minus) / dq;
-                        intrinsic > lambda
+                for (row_idx, path_idx) in itm_paths.iter().enumerate() {
+                    let slice = &design_matrix[row_idx * BASIS_DIM..(row_idx + 1) * BASIS_DIM];
+                    let cont = dot(slice, &beta_vec);
+                    continuation_estimates[*path_idx] = Some(cont);
+                }
+            }
+
+            for path in 0..params.num_paths {
+                let state = states[step][path];
+                let intrinsic = intrinsic_now[path];
+                let available = available_now[path];
+                let continuation = continuation_estimates[path].unwrap_or(discounted_future[path]);
+
+                let immediate = intrinsic * available;
+
+                let should_exercise = if intrinsic > 0.0 && available > 1e-8 {
+                    if let Some(beta) = &beta_opt {
+                        let dq = available.min(0.01);
+                        if dq > 0.0 {
+                            let cont_current = continuation_estimates[path].unwrap_or_else(|| {
+                                let phi = basis(
+                                    &states[step][path],
+                                    dt,
+                                    available,
+                                    remaining_fraction[path],
+                                );
+                                dot(&phi, beta)
+                            });
+                            let reduced_available = (available - dq).max(0.0);
+                            let reduced_remaining = (remaining_fraction[path] - dq).max(0.0);
+                            let phi_minus = basis(
+                                &states[step][path],
+                                dt,
+                                reduced_available,
+                                reduced_remaining,
+                            );
+                            let cont_minus = dot(&phi_minus, beta);
+                            let lambda = (cont_current - cont_minus) / dq;
+                            intrinsic > lambda
+                        } else {
+                            false
+                        }
                     } else {
-                        false
+                        immediate > continuation
                     }
                 } else {
-                    immediate > continuation
+                    false
+                };
+
+                let mut call_value = continuation;
+                let mut call_exercised = false;
+                let mut exercise_amount = 0.0;
+                if should_exercise && immediate > 0.0 {
+                    call_value = immediate;
+                    call_exercised = true;
+                    exercise_amount = available;
                 }
-            } else {
-                false
-            };
 
-            let mut call_value = continuation;
-            let mut call_exercised = false;
-            let mut exercise_amount = 0.0;
-            if should_exercise && immediate > 0.0 {
-                call_value = immediate;
-                call_exercised = true;
-                exercise_amount = available;
+                let put_payoff = if state.spot <= params.holder_put_trigger_price {
+                    params.holder_put_price * remaining_fraction[path]
+                } else {
+                    0.0
+                };
+
+                let mut use_put = false;
+                let mut value = call_value;
+                if put_payoff > value {
+                    use_put = true;
+                    value = put_payoff;
+                }
+
+                if use_put {
+                    period_quota_remaining[path] = 0.0;
+                    remaining_fraction[path] = 0.0;
+                } else if call_exercised {
+                    #[cfg(test)]
+                    log_exercise(step, path, exercise_amount);
+                    period_quota_remaining[path] =
+                        (period_quota_remaining[path] - exercise_amount).max(0.0);
+                    remaining_fraction[path] =
+                        (remaining_fraction[path] - exercise_amount).max(0.0);
+                }
+
+                value = value.min(params.buyback_price);
+                values[path] = value;
             }
+        }
 
-            let put_payoff = if state.spot <= params.holder_put_trigger_price {
-                params.holder_put_price * remaining_fraction[path]
-            } else {
-                0.0
-            };
-
-            let mut use_put = false;
-            let mut value = call_value;
-            if put_payoff > value {
-                use_put = true;
-                value = put_payoff;
-            }
-
-            if use_put {
-                period_quota_remaining[path] = 0.0;
-                remaining_fraction[path] = 0.0;
-            } else if call_exercised {
-                #[cfg(test)]
-                log_exercise(step, path, exercise_amount);
-                period_quota_remaining[path] =
-                    (period_quota_remaining[path] - exercise_amount).max(0.0);
-                remaining_fraction[path] = (remaining_fraction[path] - exercise_amount).max(0.0);
-            }
-
-            value = value.min(params.buyback_price);
-            values[path] = value;
+        if let Some(series_vec) = series.as_mut() {
+            let expected_price = values.iter().sum::<f64>() / params.num_paths as f64;
+            (**series_vec).push(WarrantTimeseriesPoint {
+                step,
+                time: step as f64 * dt,
+                expected_price,
+                exercise_upper_bound: exercise_sum / params.num_paths as f64,
+                put_lower_bound: put_sum / params.num_paths as f64,
+                buyback_upper_bound: params.buyback_price,
+            });
         }
     }
 
@@ -563,10 +620,87 @@ fn price_warrant_py(
 }
 
 #[cfg(feature = "python")]
+#[allow(unsafe_op_in_unsafe_fn)]
+#[pyfunction]
+#[pyo3(signature = (
+    initial_price,
+    risk_free_rate,
+    volatility,
+    maturity,
+    steps_per_year,
+    strike_discount,
+    strike_reset_steps,
+    buyback_price,
+    holder_put_trigger_price,
+    holder_put_price,
+    exercise_limit_fraction,
+    exercise_limit_period_steps,
+    next_limit_reset_step,
+    exercised_fraction_current_period,
+    num_paths,
+    seed=None,
+))]
+fn price_warrant_timeseries_py(
+    initial_price: f64,
+    risk_free_rate: f64,
+    volatility: f64,
+    maturity: f64,
+    steps_per_year: usize,
+    strike_discount: f64,
+    strike_reset_steps: usize,
+    buyback_price: f64,
+    holder_put_trigger_price: f64,
+    holder_put_price: f64,
+    exercise_limit_fraction: f64,
+    exercise_limit_period_steps: usize,
+    next_limit_reset_step: usize,
+    exercised_fraction_current_period: f64,
+    num_paths: usize,
+    seed: Option<u64>,
+) -> PyResult<(f64, Vec<(usize, f64, f64, f64, f64, f64)>)> {
+    let params = FloatingStrikeWarrantParams {
+        initial_price,
+        risk_free_rate,
+        volatility,
+        maturity,
+        steps_per_year,
+        strike_discount,
+        strike_reset_steps,
+        buyback_price,
+        holder_put_trigger_price,
+        holder_put_price,
+        exercise_limit_fraction,
+        exercise_limit_period_steps,
+        next_limit_reset_step,
+        exercised_fraction_current_period,
+        num_paths,
+        seed,
+    };
+
+    let (price, series) = price_warrant_with_timeseries(&params);
+    let records = series
+        .into_iter()
+        .map(|point: WarrantTimeseriesPoint| {
+            (
+                point.step,
+                point.time,
+                point.expected_price,
+                point.exercise_upper_bound,
+                point.put_lower_bound,
+                point.buyback_upper_bound,
+            )
+        })
+        .collect();
+
+    Ok((price, records))
+}
+
+#[cfg(feature = "python")]
 #[allow(deprecated)]
 #[pymodule]
 fn floating_strike_warrant(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(price_warrant_py, module)?)?;
+    module.add_function(wrap_pyfunction!(price_warrant_timeseries_py, module)?)?;
     Ok(())
 }
 
