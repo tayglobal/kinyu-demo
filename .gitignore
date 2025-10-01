@@ -1,5 +1,6 @@
 # Ignore generated images
 *.png
+!src/kinyu/floating_strike_warrant/docs/timeseries_plot.png
 
 # Ignore Python cache files
 __pycache__/
