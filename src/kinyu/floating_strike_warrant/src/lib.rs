@@ -29,6 +29,10 @@ pub struct FloatingStrikeWarrantParams {
     pub strike_reset_steps: usize,
     /// Issuer buy-back price that caps the warrant value.
     pub buyback_price: f64,
+    /// Underlying price level that enables the holder put right.
+    pub holder_put_trigger_price: f64,
+    /// Price paid to the holder when the put right is exercised.
+    pub holder_put_price: f64,
     /// Maximum fraction of the position that can be exercised within a quota period (e.g. 0.1 for 10%).
     pub exercise_limit_fraction: f64,
     /// Length of the exercise quota period measured in simulation steps (e.g. trading days per month).
@@ -43,7 +47,7 @@ pub struct FloatingStrikeWarrantParams {
     pub seed: Option<u64>,
 }
 
-/// Price a floating-strike warrant with strike resets, issuer call right and exercise quota limits using LSMC.
+/// Price a floating-strike warrant with strike resets, issuer call right, holder put right and exercise quota limits using LSMC.
 ///
 /// The implementation follows a quota-aware Longstaff-Schwartz Monte Carlo scheme with a polynomial basis.
 /// SVD is used to stabilise the regression at each backward induction step.
@@ -230,18 +234,34 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
 
         if step == total_steps {
             for path in 0..params.num_paths {
+                let state = states[step][path];
                 let intrinsic = intrinsic_now[path];
                 let available = available_now[path];
                 let exercise_amount = if intrinsic > 0.0 { available } else { 0.0 };
-                let payoff = intrinsic * exercise_amount;
-                #[cfg(test)]
-                if exercise_amount > 0.0 {
-                    log_exercise(step, path, exercise_amount);
+                let call_payoff = intrinsic * exercise_amount;
+                let put_payoff = if state.spot <= params.holder_put_trigger_price {
+                    params.holder_put_price * remaining_fraction[path]
+                } else {
+                    0.0
+                };
+
+                let mut value = call_payoff;
+                if put_payoff > value {
+                    period_quota_remaining[path] = 0.0;
+                    remaining_fraction[path] = 0.0;
+                    value = put_payoff;
+                } else {
+                    #[cfg(test)]
+                    if exercise_amount > 0.0 {
+                        log_exercise(step, path, exercise_amount);
+                    }
+                    period_quota_remaining[path] =
+                        (period_quota_remaining[path] - exercise_amount).max(0.0);
+                    remaining_fraction[path] =
+                        (remaining_fraction[path] - exercise_amount).max(0.0);
                 }
-                values[path] = payoff.min(params.buyback_price);
-                period_quota_remaining[path] =
-                    (period_quota_remaining[path] - exercise_amount).max(0.0);
-                remaining_fraction[path] = (remaining_fraction[path] - exercise_amount).max(0.0);
+
+                values[path] = value.min(params.buyback_price);
             }
             continue;
         }
@@ -286,6 +306,7 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
         }
 
         for path in 0..params.num_paths {
+            let state = states[step][path];
             let intrinsic = intrinsic_now[path];
             let available = available_now[path];
             let continuation = continuation_estimates[path].unwrap_or(discounted_future[path]);
@@ -322,17 +343,38 @@ fn lsmc_price(params: &FloatingStrikeWarrantParams, grid: &SimulationGrid) -> f6
                 false
             };
 
-            let mut value = if should_exercise && immediate > 0.0 {
+            let mut call_value = continuation;
+            let mut call_exercised = false;
+            let mut exercise_amount = 0.0;
+            if should_exercise && immediate > 0.0 {
+                call_value = immediate;
+                call_exercised = true;
+                exercise_amount = available;
+            }
+
+            let put_payoff = if state.spot <= params.holder_put_trigger_price {
+                params.holder_put_price * remaining_fraction[path]
+            } else {
+                0.0
+            };
+
+            let mut use_put = false;
+            let mut value = call_value;
+            if put_payoff > value {
+                use_put = true;
+                value = put_payoff;
+            }
+
+            if use_put {
+                period_quota_remaining[path] = 0.0;
+                remaining_fraction[path] = 0.0;
+            } else if call_exercised {
                 #[cfg(test)]
-                log_exercise(step, path, available);
-                let exercise_amount = available;
+                log_exercise(step, path, exercise_amount);
                 period_quota_remaining[path] =
                     (period_quota_remaining[path] - exercise_amount).max(0.0);
                 remaining_fraction[path] = (remaining_fraction[path] - exercise_amount).max(0.0);
-                immediate
-            } else {
-                continuation
-            };
+            }
 
             value = value.min(params.buyback_price);
             values[path] = value;
@@ -368,6 +410,14 @@ fn validate(params: &FloatingStrikeWarrantParams) {
     assert!(
         params.buyback_price.is_finite() && params.buyback_price >= 0.0,
         "Buyback price must be non-negative"
+    );
+    assert!(
+        params.holder_put_trigger_price.is_finite() && params.holder_put_trigger_price >= 0.0,
+        "Holder put trigger price must be non-negative"
+    );
+    assert!(
+        params.holder_put_price.is_finite() && params.holder_put_price >= 0.0,
+        "Holder put price must be non-negative"
     );
     assert!(
         params.exercise_limit_fraction.is_finite() && params.exercise_limit_fraction >= 0.0,
@@ -463,6 +513,8 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
     strike_discount,
     strike_reset_steps,
     buyback_price,
+    holder_put_trigger_price,
+    holder_put_price,
     exercise_limit_fraction,
     exercise_limit_period_steps,
     next_limit_reset_step,
@@ -479,6 +531,8 @@ fn price_warrant_py(
     strike_discount: f64,
     strike_reset_steps: usize,
     buyback_price: f64,
+    holder_put_trigger_price: f64,
+    holder_put_price: f64,
     exercise_limit_fraction: f64,
     exercise_limit_period_steps: usize,
     next_limit_reset_step: usize,
@@ -495,6 +549,8 @@ fn price_warrant_py(
         strike_discount,
         strike_reset_steps,
         buyback_price,
+        holder_put_trigger_price,
+        holder_put_price,
         exercise_limit_fraction,
         exercise_limit_period_steps,
         next_limit_reset_step,
@@ -528,6 +584,8 @@ mod tests {
             strike_discount: 0.9,
             strike_reset_steps: 4,
             buyback_price: 100.0,
+            holder_put_trigger_price: 0.0,
+            holder_put_price: 0.0,
             exercise_limit_fraction: 0.2,
             exercise_limit_period_steps: 21,
             next_limit_reset_step: 10,
@@ -553,6 +611,8 @@ mod tests {
             strike_discount: 1.0,
             strike_reset_steps: 1,
             buyback_price: 10.0,
+            holder_put_trigger_price: 0.0,
+            holder_put_price: 0.0,
             exercise_limit_fraction: 0.1,
             exercise_limit_period_steps: 21,
             next_limit_reset_step: 10,
@@ -577,6 +637,8 @@ mod tests {
             strike_discount: 0.9,
             strike_reset_steps: 4,
             buyback_price: 40.0,
+            holder_put_trigger_price: 0.0,
+            holder_put_price: 0.0,
             exercise_limit_fraction: 0.2,
             exercise_limit_period_steps: 21,
             next_limit_reset_step: 5,
@@ -794,6 +856,46 @@ mod tests {
             partial_found,
             "expected at least one partial exercise event"
         );
+    }
+
+    #[test]
+    fn holder_put_triggers_when_spot_below_threshold() {
+        let mut params = baseline_params();
+        params.initial_price = 50.0;
+        params.risk_free_rate = 0.0;
+        params.strike_discount = 1.0;
+        params.volatility = 0.0;
+        params.maturity = 0.25;
+        params.steps_per_year = 12;
+        params.num_paths = 1;
+        params.exercise_limit_fraction = 1.0;
+        params.exercise_limit_period_steps = 1;
+        params.holder_put_trigger_price = 60.0;
+        params.holder_put_price = 7.5;
+        params.buyback_price = 100.0;
+
+        let price = price_warrant(&params);
+        approx_eq(price, params.holder_put_price, 1e-9);
+    }
+
+    #[test]
+    fn holder_put_respects_buyback_cap() {
+        let mut params = baseline_params();
+        params.initial_price = 30.0;
+        params.risk_free_rate = 0.0;
+        params.strike_discount = 1.0;
+        params.volatility = 0.0;
+        params.maturity = 0.25;
+        params.steps_per_year = 12;
+        params.num_paths = 1;
+        params.exercise_limit_fraction = 1.0;
+        params.exercise_limit_period_steps = 1;
+        params.holder_put_trigger_price = 40.0;
+        params.holder_put_price = 25.0;
+        params.buyback_price = 5.0;
+
+        let price = price_warrant(&params);
+        approx_eq(price, params.buyback_price, 1e-9);
     }
 
     #[test]
