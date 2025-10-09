@@ -1,9 +1,10 @@
-"""Example MCP client that talks to ``mcp-server-git`` without third-party deps.
+"""Example MCP client that talks to an arbitrary MCP server.
 
 The goal of this module is to demonstrate the minimum plumbing that a Python
 program needs in order to communicate with an MCP server using only the
-standard library.  It follows the JSON-RPC interface that the
-``mcp-server-git`` package exposes over stdio.
+standard library.  It follows the JSON-RPC interface that MCP servers expose
+over stdio.  The included CLI showcases the ``mcp-server-git`` configuration,
+but the ``MCPClient`` class itself is agnostic to the server it launches.
 
 Usage
 -----
@@ -17,7 +18,7 @@ The script will:
   ``MCP_CONFIG`` constant,
 * perform the JSON-RPC handshake (`initialize` followed by
   ``notifications/initialized``),
-* list the Git-related tools that the server exposes, and
+* list the tools that the server exposes, and
 * call ``git_status`` as a concrete example.
 
 Because the transport uses newline-delimited JSON, the implementation below
@@ -46,7 +47,7 @@ MCP_CONFIG: JsonDict = {
         }
     }
 }
-"""Model Context Protocol configuration for the git server."""
+"""Demonstration Model Context Protocol configuration."""
 
 
 @dataclass
@@ -57,11 +58,12 @@ class PendingRequest:
 
 
 @dataclass
-class MCPGitClient:
-    """Minimal asynchronous MCP client that talks to ``mcp-server-git``."""
+class MCPClient:
+    """Minimal asynchronous MCP client that can launch any configured server."""
 
-    repository: Path
+    server_name: str = "git"
     config: JsonDict = field(default_factory=lambda: json.loads(json.dumps(MCP_CONFIG)))
+    server_args: list[str] = field(default_factory=list)
     _process: Process | None = field(default=None, init=False, repr=False)
     _stdout_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _stderr_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
@@ -69,7 +71,7 @@ class MCPGitClient:
     _next_request_id: int = field(default=1, init=False, repr=False)
     _loop: asyncio.AbstractEventLoop | None = field(default=None, init=False, repr=False)
 
-    async def __aenter__(self) -> "MCPGitClient":
+    async def __aenter__(self) -> "MCPClient":
         await self._start()
         return self
 
@@ -77,14 +79,12 @@ class MCPGitClient:
         await self.close()
 
     async def _start(self) -> None:
-        """Launch the ``mcp-server-git`` subprocess and set up background tasks."""
+        """Launch the configured MCP server subprocess and set up background tasks."""
 
-        server_cfg = self.config["servers"]["git"]
+        server_cfg = self.config["servers"][self.server_name]
         command = server_cfg["command"]
         args = list(server_cfg.get("args", []))
-
-        # ``mcp-server-git`` accepts a ``--repository`` CLI argument.
-        args.extend(["--repository", str(self.repository)])
+        args.extend(self.server_args)
 
         self._loop = asyncio.get_running_loop()
 
@@ -153,7 +153,7 @@ class MCPGitClient:
         )
 
     async def list_tools(self, cursor: str | None = None) -> JsonDict:
-        """Return the list of tools exposed by ``mcp-server-git``."""
+        """Return the list of tools exposed by the connected server."""
 
         request_id = self._next_id()
         request = {
@@ -278,13 +278,33 @@ class MCPGitClient:
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Minimal MCP client for mcp-server-git")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Minimal MCP client example that can launch servers defined in the"
+            " provided configuration."
+        )
+    )
+    parser.add_argument(
+        "--server-name",
+        default="git",
+        help="Identifier of the server to launch from the MCP configuration",
+    )
+    parser.add_argument(
+        "--server-arg",
+        action="append",
+        dest="server_args",
+        default=None,
+        help="Additional CLI arguments for the server command (repeatable)",
+    )
     parser.add_argument(
         "--repository",
         "-r",
         type=Path,
-        default=Path.cwd(),
-        help="Git repository path to expose to the MCP server",
+        default=None,
+        help=(
+            "Convenience flag for the git demo: append --repository <path> when"
+            " launching the server"
+        ),
     )
     parser.add_argument(
         "--tool",
@@ -316,8 +336,21 @@ def parse_tool_arguments(arguments: list[str] | None) -> JsonDict:
     return parsed
 
 
-async def demo(tool_name: str, repository: Path, tool_arguments: JsonDict | None = None) -> None:
-    async with MCPGitClient(repository=repository) as client:
+async def demo(
+    tool_name: str,
+    server_name: str,
+    tool_arguments: JsonDict | None = None,
+    *,
+    server_args: list[str] | None = None,
+    config: JsonDict | None = None,
+) -> None:
+    source_config = config if config is not None else MCP_CONFIG
+    client_config = json.loads(json.dumps(source_config))
+    async with MCPClient(
+        server_name=server_name,
+        server_args=list(server_args or []),
+        config=client_config,
+    ) as client:
         tools: list[JsonDict] = []
         cursor: str | None = None
         while True:
@@ -332,11 +365,7 @@ async def demo(tool_name: str, repository: Path, tool_arguments: JsonDict | None
             description = tool.get("description", "")
             print(f"  - {tool['name']}: {description}")
 
-        arguments = {"repo_path": str(repository)}
-        if tool_arguments:
-            arguments.update(tool_arguments)
-
-        result = await client.call_tool(tool_name, arguments=arguments)
+        result = await client.call_tool(tool_name, arguments=tool_arguments or {})
         print("\nTool response:")
         content_blocks = result.get("content", [])
         if content_blocks:
@@ -358,8 +387,32 @@ def main(argv: list[str] | None = None) -> int:
 
     tool_arguments = parse_tool_arguments(args.args)
 
+    server_args = list(args.server_args or [])
+
+    repo_for_tool: Path | None = None
+
+    if args.repository is not None:
+        server_args.extend(["--repository", str(args.repository)])
+        repo_for_tool = args.repository
+
+    if args.server_name == "git":
+        if repo_for_tool is None:
+            repo_for_tool = Path.cwd()
+            if "--repository" not in server_args and "-r" not in server_args:
+                server_args.extend(["--repository", str(repo_for_tool)])
+
+        if "repo_path" not in tool_arguments and repo_for_tool is not None:
+            tool_arguments["repo_path"] = str(repo_for_tool)
+
     try:
-        asyncio.run(demo(args.tool, args.repository, tool_arguments))
+        asyncio.run(
+            demo(
+                args.tool,
+                args.server_name,
+                tool_arguments,
+                server_args=server_args,
+            )
+        )
     except KeyboardInterrupt:
         return 1
     except Exception as exc:  # noqa: BLE001 - display readable error to users

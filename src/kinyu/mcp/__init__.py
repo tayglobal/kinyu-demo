@@ -5,4 +5,6 @@ standard library so it can be used in environments where additional MCP
 client libraries are unavailable.
 """
 
-__all__ = ["git"]
+from .git import MCPClient, MCP_CONFIG  # noqa: F401
+
+__all__ = ["MCPClient", "MCP_CONFIG"]
